@@ -1,0 +1,9 @@
+RL/__pycache__/
+RL/log.txt
+__pycache__/
+envs/__pycache__/
+tests/__pycache__/
+tests/log.txt
+utils/__pycache__/
+.idea/
+RL/wandb
