@@ -1,4 +1,5 @@
 import argparse
+import sys
 from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utils import config_wandb
@@ -13,7 +14,7 @@ def parse_args():
                         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--use_wandb", default=False, type=lambda x: bool(strtobool(x)),
                         help='Use weights and biases to track the exp')
-    parser.add_argument('--wandb-project-name', type=str, default='ppo_ant')
+    parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
 
     # algorithm args
     parser.add_argument('--total_timesteps', type=int, default=1000000)
@@ -58,8 +59,9 @@ if __name__ == '__main__':
     cfg = parse_args()
 
     if cfg.use_wandb:
-        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps)
+        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
 
     alg = PPO(cfg.seed, cfg)
     num_updates = cfg.total_timesteps // cfg.batch_size
     alg.train(num_updates, traj_len=cfg.num_steps)
+    sys.exit(0)

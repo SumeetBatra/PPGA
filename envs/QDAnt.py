@@ -19,10 +19,18 @@ class QDAntWorker(EventLoopObject):
         self.pid = pid
         self.res_buffer = res_buffer
         self.done_buffer = done_buffer
+        self.auto_reset = [False for _ in range(len(self.envs))]
 
     def step(self, action):
         for idx, env in enumerate(self.envs):
-            obs, rew, done, info = env.step(action[self.pid])
+            if self.auto_reset[idx]:
+                obs = env.reset()
+                rew, done, = 0, False
+                self.auto_reset[idx] = False
+            else:
+                obs, rew, done, info = env.step(action[self.pid])
+                if done:
+                    self.auto_reset[idx] = True
             obs_tensor, rew_tensor, done_tensor = torch.from_numpy(obs), torch.Tensor([rew]), torch.Tensor([done])
             obs_rew_done = torch.cat((obs_tensor, rew_tensor, done_tensor))
             self.res_buffer[self.pid, idx, :] = obs_rew_done

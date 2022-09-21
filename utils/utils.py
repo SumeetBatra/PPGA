@@ -1,5 +1,7 @@
 import logging
 import wandb
+import os
+import torch
 from colorlog import ColoredFormatter
 
 ch = logging.StreamHandler()
@@ -36,8 +38,18 @@ log.addHandler(fh)
 
 def config_wandb(**kwargs):
     # wandb initialization
-    wandb.init(project='QDPPO', entity='sumeetb')
+    wandb.init(project='QDPPO', entity='sumeetb', name=kwargs['run_name'])
     cfg = {}
     for key, val in kwargs.items():
         cfg[key] = val
     wandb.config = cfg
+
+
+def save_checkpoint(cp_dir, cp_name, model, optimizer, **kwargs):
+    os.makedirs(cp_dir, exist_ok=True)
+    params = {}
+    params['model_state_dict'] = model.state_dict()
+    params['optim_state_dict'] = optimizer.state_dict()
+    for key, val in kwargs:
+        params[key] = val
+    torch.save(params, os.path.join(cp_dir, cp_name))

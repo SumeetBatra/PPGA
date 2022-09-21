@@ -7,3 +7,6 @@ tests/log.txt
 utils/__pycache__/
 .idea/
 RL/wandb
+log.txt
+checkpoints/
+wandb/
