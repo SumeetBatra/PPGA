@@ -1,10 +1,11 @@
 import torch
 import gym
+import numpy as np
 from signal_slot.signal_slot import *
 
 import envs.QDAnt
-from envs import *
 from utils.utils import log
+from envs.env import make_env
 
 
 env_dispatch = {
@@ -12,12 +13,16 @@ env_dispatch = {
 }
 
 
-class VecEnv(EventLoopObject):
-    def __init__(self, env_name: str, num_workers, envs_per_worker=1):
+class VecEnv(EventLoopObject, gym.Env):
+    def __init__(self, cfg, env_name: str, num_workers, envs_per_worker=1):
+        self.cfg = cfg
         process = EventLoopProcess('main')
         EventLoopObject.__init__(self, process.event_loop, 'QDVecEnv')
+        gym.Env.__init__(self)
 
-        dummy_env = gym.make(env_name)
+        dummy_env = make_env(env_name, seed=0, gamma=cfg.gamma)()
+        self.single_observation_space = dummy_env.observation_space
+        self.single_action_space = dummy_env.action_space
         self.obs_dim = dummy_env.observation_space.shape[0]
         self.obs_shape = dummy_env.observation_space.shape
         self.action_space = dummy_env.action_space
@@ -27,7 +32,8 @@ class VecEnv(EventLoopObject):
         self.res_buffer = torch.zeros((num_workers, envs_per_worker, self.obs_dim + 2)).share_memory_()
         self.done_buffer = torch.zeros((num_workers,)).share_memory_()
         self.worker_processes = [EventLoopProcess(f'process_{i}') for i in range(num_workers)]
-        self.workers = [env_dispatch[env_name](i,
+        self.workers = [env_dispatch[env_name](cfg,
+                                               i,
                                                self.worker_processes[i].event_loop,
                                                f'worker_{self.worker_processes[i].object_id}',
                                                self.res_buffer,
@@ -56,14 +62,14 @@ class VecEnv(EventLoopObject):
         while not all(self.done_buffer):
             ...
         obs, rew, done = self.res_buffer[:, :, :self.obs_dim], self.res_buffer[:, :, -2], self.res_buffer[:, :, -1]
-        return obs.reshape(self.num_envs, -1), rew.reshape(self.num_envs, -1), done.reshape(self.num_envs, -1)
+        return obs.reshape(self.num_envs, -1), rew.reshape(self.num_envs, -1), done.reshape(self.num_envs, -1), {}
 
     def reset(self):
         self.reset_signal.emit()
         while not all(self.done_buffer):
             ...
         obs, rew, done = self.res_buffer[:, :, :self.obs_dim], self.res_buffer[:, :, -2], self.res_buffer[:, :, -1]
-        return obs.reshape(self.num_envs, -1), rew.reshape(self.num_envs, -1), done.reshape(self.num_envs, -1)
+        return obs.reshape(self.num_envs, -1)
 
     def connect_signals_to_slots(self):
         for worker in self.workers:
