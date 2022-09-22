@@ -1,6 +1,8 @@
 import gym
+import QDgym
 import numpy as np
 from envs.wrappers.normalize_numpy import NormalizeObservation, NormalizeReward
+from envs.wrappers.reward import ForwardReward
 
 
 def make_env(env_id, seed, gamma):

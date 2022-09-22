@@ -3,14 +3,9 @@ import gym
 import numpy as np
 from signal_slot.signal_slot import *
 
-import envs.QDAnt
 from utils.utils import log
 from envs.env import make_env
-
-
-env_dispatch = {
-    'QDAntBulletEnv-v0': envs.QDAnt.QDAntWorker
-}
+from envs.worker import Worker
 
 
 class VecEnv(EventLoopObject, gym.Env):
@@ -32,14 +27,14 @@ class VecEnv(EventLoopObject, gym.Env):
         self.res_buffer = torch.zeros((num_workers, envs_per_worker, self.obs_dim + 2)).share_memory_()
         self.done_buffer = torch.zeros((num_workers,)).share_memory_()
         self.worker_processes = [EventLoopProcess(f'process_{i}') for i in range(num_workers)]
-        self.workers = [env_dispatch[env_name](cfg,
-                                               i,
-                                               self.worker_processes[i].event_loop,
-                                               f'worker_{self.worker_processes[i].object_id}',
-                                               self.res_buffer,
-                                               self.done_buffer,
-                                               render=False,
-                                               num_envs=envs_per_worker) for i in range(num_workers)]
+        self.workers = [Worker(cfg,
+                               i,
+                               self.worker_processes[i].event_loop,
+                               f'worker_{self.worker_processes[i].object_id}',
+                               self.res_buffer,
+                               self.done_buffer,
+                               render=False,
+                               num_envs=envs_per_worker) for i in range(num_workers)]
         self.num_envs = num_workers * envs_per_worker
         self.connect_signals_to_slots()
         for proc in self.worker_processes:

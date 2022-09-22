@@ -1,21 +1,14 @@
-import sys
-import gym
-import numpy as np
 import torch
 
 from signal_slot.signal_slot import *
-from QDgym.QDgym_envs import QDAntBulletEnv
-from utils.utils import log
 from envs.env import make_env
 
-# vectorized implementation of QDAnt, using signal-slot model to communicate b/w processes
 
-
-class QDAntWorker(EventLoopObject):
+class Worker(EventLoopObject):
     def __init__(self, cfg, pid, event_loop, object_id, res_buffer, done_buffer, render=False, num_envs=1):
         EventLoopObject.__init__(self, event_loop, object_id)
         self.cfg = cfg
-        self.envs = [make_env('QDAntBulletEnv-v0', seed=i, gamma=cfg.gamma)() for i in range(num_envs)]
+        self.envs = [make_env(cfg.env_name, seed=i, gamma=cfg.gamma)() for i in range(num_envs)]
         self.pid = pid
         self.res_buffer = res_buffer
         self.done_buffer = done_buffer
@@ -38,7 +31,7 @@ class QDAntWorker(EventLoopObject):
 
     def reset(self):
         for idx, env in enumerate(self.envs):
-            obs  = env.reset()
+            obs = env.reset()
             obs = torch.from_numpy(obs)
             obs_rew_done = torch.cat((obs, torch.Tensor([0]), torch.Tensor([False])))
             self.res_buffer[self.pid, idx, :] = obs_rew_done
@@ -48,4 +41,3 @@ class QDAntWorker(EventLoopObject):
         for env in self.envs:
             env.close()
         self.event_loop.stop()
-
