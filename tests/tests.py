@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from time import time
-from envs.VecEnv import VecEnv
+from envs.vec_env import VecEnv
 from utils.utils import log
 
 

@@ -5,7 +5,7 @@ import numpy as np
 
 
 def qd_gym():
-    env = gym.make("QDAntBulletEnv-v0", render=True)
+    env = gym.make("QDHalfCheetahBulletEnv-v0", render=True)
     state = env.reset()
     done = False
     for _ in range(2000):

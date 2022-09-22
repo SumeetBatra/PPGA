@@ -7,8 +7,10 @@ import torch.nn as nn
 import utils.utils
 import wandb
 
-from envs.VecEnv import VecEnv
+from envs.vec_env import VecEnv
 from utils.utils import log, save_checkpoint
+from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
+
 
 # based off of the clean-rl implementation
 # https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_continuous_action.py
@@ -20,24 +22,34 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
+def make_vec_env(cfg):
+    vec_env = VecEnv(cfg,
+                     cfg.env_name,
+                     num_workers=cfg.num_workers,
+                     envs_per_worker=cfg.envs_per_worker)
+    # these wrappers are applied at the vecenv level instead of the single env level
+    # vec_env = NormalizeObservation(vec_env)
+    # vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
+    return vec_env
+
+
 class Agent(nn.Module):
     def __init__(self, obs_shape, action_shape: np.ndarray):
         super().__init__()
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 256)),
+            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(256, 256)),
+            layer_init(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(256, 1), std=1.0),
+            layer_init(nn.Linear(64, 1), std=1.0),
         )
 
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 256)),
+            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(256, 256)),
+            layer_init(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(256, np.prod(action_shape)), std=0.01),
-            nn.Tanh(),
+            layer_init(nn.Linear(64, np.prod(action_shape)), std=0.01),
         )
 
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
@@ -56,26 +68,15 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(obs)
 
 
-def make_env(env_id, seed):
-    def thunk():
-        env = gym.make(env_id)
-        env.seed(seed)
-        env.action_space.seed(seed)
-        env.observation_space.seed(seed)
-        return env
-    return thunk
-
-
 class PPO:
     def __init__(self, seed, cfg):
-        # self.vec_env = VecEnv(cfg.env_name,
-        #                       num_workers=cfg.num_workers,
-        #                       envs_per_worker=cfg.envs_per_worker)
-        self.vec_env = gym.vector.AsyncVectorEnv(
-            [make_env(cfg.env_name, seed + i) for i in range(cfg.num_workers)]
-        )
+        self.vec_env = make_vec_env(cfg)
+        # self.vec_env = gym.vector.AsyncVectorEnv(
+        #     [make_env(cfg.env_name, seed + i, cfg.gamma) for i in range(cfg.num_workers)]
+        # )
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.agent = Agent(self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape).to(self.device)
+        self.agent = Agent(self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape).to(
+            self.device)
         self.optimizer = torch.optim.Adam(self.agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
@@ -98,17 +99,19 @@ class PPO:
                     next_values = next_value
                 else:
                     is_next_nonterminal = 1.0 - dones[t + 1]
-                    next_values = values[t+1]
+                    next_values = values[t + 1]
                 is_next_nonterminal = is_next_nonterminal.to(self.device).reshape(1, -1)
                 delta = rewards[t] + self.cfg.gamma * next_values * is_next_nonterminal - values[t]
-                advantages[t] = lastgaelam =\
+                advantages[t] = lastgaelam = \
                     delta + self.cfg.gamma * self.cfg.gae_lambda * is_next_nonterminal * lastgaelam
             returns = advantages + values
         return advantages, returns
 
     def train(self, num_updates, traj_len):
-        obs = torch.zeros((traj_len, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(self.device)
-        actions = torch.zeros((traj_len, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(self.device)
+        obs = torch.zeros((traj_len, self.vec_env.num_envs) +
+                          self.vec_env.single_observation_space.shape).to(self.device)
+        actions = torch.zeros((traj_len, self.vec_env.num_envs) +
+                              self.vec_env.single_action_space.shape).to(self.device)
         logprobs = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
         rewards = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
         dones = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
@@ -116,7 +119,7 @@ class PPO:
 
         global_step = 0
         next_obs = self.vec_env.reset()
-        next_obs = torch.from_numpy(next_obs).to(self.device)
+        next_obs = next_obs.to(self.device)
         # next_obs = next_obs.to(self.device)
         next_done = torch.zeros(self.vec_env.num_envs).to(self.device)
 
@@ -139,10 +142,7 @@ class PPO:
                 logprobs[step] = logprob
 
                 next_obs, reward, next_done, _ = self.vec_env.step(action.cpu().numpy())
-                next_obs = torch.from_numpy(next_obs).to(self.device)
-                reward = torch.from_numpy(reward).to(self.device)
-                next_done = torch.from_numpy(next_done).to(self.device)
-                # next_obs = next_obs.to(self.device)
+                next_obs = next_obs.to(self.device)
                 rewards[step] = reward.squeeze()
 
                 # TODO: logging

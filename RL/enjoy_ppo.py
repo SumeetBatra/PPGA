@@ -23,7 +23,8 @@ def enjoy():
         log.debug(f'{done=}')
         act, _, _, _ = agent.get_action_and_value(obs)
         act = act.squeeze()
-        env.step(act.cpu().numpy())
+        obs, _, _, _ = env.step(act.cpu().numpy())
+        obs = torch.from_numpy(obs).to(device).reshape(1, -1)
     fitness = env.tot_reward
     log.debug(f'{fitness=}')
     env.close()
