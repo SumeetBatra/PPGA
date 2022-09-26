@@ -10,3 +10,5 @@ RL/wandb
 log.txt
 checkpoints/
 wandb/
+logs/
+dask-worker-space/

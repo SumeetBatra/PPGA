@@ -115,8 +115,9 @@ class LinearPolicy(nn.Module):
 class GlobalCritic(nn.Module):
     def __init__(self, obs_shape):
         super().__init__()
+        self.m_dim = 2  # dimensionality of the measures
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(obs_shape).prod() + self.m_dim, 64)),
             nn.Tanh(),
             layer_init(nn.Linear(64, 64)),
             nn.Tanh(),
@@ -188,8 +189,12 @@ class PPO:
 
     def train(self, num_updates, traj_len):
         num_updates = 1
+        obs_shape = self.vec_env.single_observation_space.shape
+        obs_measure_shape = (obs_shape[0] + 2,)
         obs = torch.zeros((traj_len, self.vec_env.num_envs) +
                           self.vec_env.single_observation_space.shape).to(self.device)
+        obs_measures = torch.zeros((traj_len, self.vec_env.num_envs) +
+                                   obs_measure_shape).to(self.device)
         actions = torch.zeros((traj_len, self.vec_env.num_envs) +
                               self.vec_env.single_action_space.shape).to(self.device)
         logprobs = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
@@ -226,8 +231,8 @@ class PPO:
 
                 with torch.no_grad():
                     action, logprob, _ = self._agent.get_action(next_obs)
-                    value = self._critic.get_value(next_obs)
-                    values[step] = value.flatten()
+                    # value = self._critic.get_value(next_obs)
+                    # values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
 
@@ -240,13 +245,21 @@ class PPO:
                     if bc[0] is not None:
                         measures[:, i] = torch.tensor(bc).to(self.device)
 
+            for step in range(traj_len):
+                with torch.no_grad():
+                    next_obs = obs[step]
+                    all_obs = torch.cat((next_obs, measures.T), dim=1)
+                    obs_measures[step] = all_obs
+                    value = self._critic.get_value(all_obs)
+                    values[step] = value.flatten()
+
                 # TODO: logging
-                log.debug(f'{global_step=}')
-                log.debug(f'{infos=}')
-            advantages, returns = self.calculate_rewards(next_obs, next_done, rewards, values, dones, traj_len=traj_len)
+                # log.debug(f'{global_step=}')
+            advantages, returns = self.calculate_rewards(all_obs, next_done, rewards, values, dones, traj_len=traj_len)
 
             # flatten the batch
             b_obs = obs.reshape((-1,) + self.vec_env.single_observation_space.shape)
+            b_obs_measures = obs_measures.reshape((-1,) + (self.vec_env.single_observation_space.shape[0] + 2,))
             b_logprobs = logprobs.reshape(-1)
             b_actions = actions.reshape((-1,) + self.vec_env.single_action_space.shape)
             b_advantages = advantages.reshape(-1)
@@ -267,7 +280,7 @@ class PPO:
 
                     _, newlogprob, entropy = self._agent.get_action(b_obs[mb_inds],
                                                                     b_actions[mb_inds])
-                    newvalue = self._critic.get_value(b_obs[mb_inds])
+                    newvalue = self._critic.get_value(b_obs_measures[mb_inds])
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -342,14 +355,14 @@ class PPO:
                     "losses/approx_kl": approx_kl.item(),
                     "losses/clipfrac": np.mean(clipfracs),
                     "losses/explained_variance": explained_var,
-                    "average_reward": torch.sum(rewards) / self.vec_env.num_envs,
+                    "RL/average_reward": torch.sum(rewards) / self.vec_env.num_envs,
                     "Env step": global_step
                 })
-        log.debug("Saving checkpoint...")
-        save_checkpoint('checkpoints', 'checkpoint0', self._agent, self.actor_optim)
+        # log.debug("Saving checkpoint...")
+        # save_checkpoint('checkpoints', 'checkpoint0', self._agent, self.actor_optim)
         # self.vec_env.stop.emit()
         # self.vec_env.close()
-        log.debug("Done!")
+        log.debug("Finished PPO training step!")
         f_jacobian = np.array([p.detach().cpu().numpy().ravel() for p in self.agent.parameters()][1]) - original_theta
         return np.array([total_reward]).reshape((1,)), f_jacobian.reshape(1, -1), \
                torch.mean(measures, dim=1).detach().cpu().numpy().reshape(1, -1), m_jacobians.reshape((1, 2, -1))
@@ -369,10 +382,9 @@ class PPO:
         obs = torch.from_numpy(obs).to(self.device)
         # obs = obs.repeat_interleave(agents, dim=1)
         total_reward = np.zeros((len(agents),))
-        impact_x_pos = None
-        impact_y_vel = None
-        all_y_vels = []
-        for _ in range(num_steps):
+
+        measures = np.zeros((2, self.vec_env.num_envs))
+        for step in range(num_steps):
             all_logits = []
             for i, agent in enumerate(agents):
                 logits = obs[i] @ agent
@@ -382,25 +394,20 @@ class PPO:
             obs = torch.from_numpy(obs).to(self.device)
             total_reward += rew
 
-            # Refer to the definition of state here:
-            # https://github.com/openai/gym/blob/master/gym/envs/box2d/lunar_lander.py#L306
-            # TODO: make this vectorized
-            x_pos = obs[0]
-            y_vel = obs[3]
-            leg0_touch = bool(obs[6])
-            leg1_touch = bool(obs[7])
-            all_y_vels.append(y_vel)
+            for i, info in enumerate(infos):
+                bc = info['desc']
+                if bc[0] is not None:
+                    measures[:, i] = bc
 
-            # Check if the lunar lander is impacting for the first time.
-            if impact_x_pos is None and (leg0_touch or leg1_touch):
-                impact_x_pos = x_pos
-                impact_y_vel = y_vel
+            # log.debug(f'Evaluation Step: {step}')
 
         # If the lunar lander did not land, set the x-pos to the one from the final
         # timestep, and set the y-vel to the max y-vel (we use min since the lander
         # goes down).
-        if impact_x_pos is None:
-            impact_x_pos = x_pos
-            impact_y_vel = min(all_y_vels)
+        for i, info in enumerate(infos):
+            bc = info['desc']
+            if bc[0] is None:
+                measures[:, i] = [info['x_pos'], info['y_vel']]
 
-        return total_reward, (impact_x_pos, impact_y_vel)
+        log.debug('Finished Evaluation Step')
+        return total_reward.reshape((-1,)), measures.reshape((-1, 2))
