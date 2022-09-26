@@ -1,0 +1,3 @@
+[submodule "dqd"]
+	path = dqd
+	url = git@github.com:SumeetBatra/dqd.git
