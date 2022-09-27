@@ -7,6 +7,7 @@ import torch.nn as nn
 import utils.utils
 import wandb
 
+from functorch import vmap, combine_state_for_ensemble
 from envs.vec_env import VecEnv
 from envs.env import make_env
 from utils.utils import log, save_checkpoint
@@ -111,6 +112,12 @@ class LinearPolicy(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy()
 
+    def forward(self, x):
+        return self.actor(x)
+
+    def update_weights(self, weights):
+        self.actor.weight.data = weights
+
 
 class GlobalCritic(nn.Module):
     def __init__(self, obs_shape):
@@ -189,6 +196,8 @@ class PPO:
 
     def train(self, num_updates, traj_len):
         num_updates = 1
+        self.actor_optim = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+
         obs_shape = self.vec_env.single_observation_space.shape
         obs_measure_shape = (obs_shape[0] + 2,)
         obs = torch.zeros((traj_len, self.vec_env.num_envs) +
@@ -202,6 +211,7 @@ class PPO:
         dones = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
         values = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
         measures = torch.zeros((2, self.vec_env.num_envs), requires_grad=True).to(self.device)
+        measures_filled = torch.zeros(self.vec_env.num_envs).to(torch.bool)
         total_reward = 0.0
 
         # original params so we can measure f's jacobian later
@@ -242,8 +252,16 @@ class PPO:
                 rewards[step] = torch.from_numpy(reward).squeeze()
                 for i, info in enumerate(infos):
                     bc = info['desc']
-                    if bc[0] is not None:
+                    if bc[0] is not None and not measures_filled[i]:
                         measures[:, i] = torch.tensor(bc).to(self.device)
+                        measures_filled[i] = True
+
+            # If the lunar lander did not land, set the x-pos to the one from the final
+            # timestep, and set the y-vel to the max y-vel (we use min since the lander
+            # goes down).
+            for i, info in enumerate(infos):
+                if not measures_filled[i]:
+                    measures[:, i] = torch.tensor([info['x_pos'], info['y_vel']]).to(self.device)
 
             for step in range(traj_len):
                 with torch.no_grad():
@@ -384,6 +402,7 @@ class PPO:
         total_reward = np.zeros((len(agents),))
 
         measures = np.zeros((2, self.vec_env.num_envs))
+        measures_filled = torch.zeros(self.vec_env.num_envs).to(torch.bool)
         for step in range(num_steps):
             all_logits = []
             for i, agent in enumerate(agents):
@@ -396,8 +415,9 @@ class PPO:
 
             for i, info in enumerate(infos):
                 bc = info['desc']
-                if bc[0] is not None:
+                if bc[0] is not None and not measures_filled[i]:
                     measures[:, i] = bc
+                    measures_filled[i] = True
 
             # log.debug(f'Evaluation Step: {step}')
 
@@ -405,9 +425,47 @@ class PPO:
         # timestep, and set the y-vel to the max y-vel (we use min since the lander
         # goes down).
         for i, info in enumerate(infos):
-            bc = info['desc']
-            if bc[0] is None:
-                measures[:, i] = [info['x_pos'], info['y_vel']]
+            if not measures_filled[i]:
+                measures[:, i] = torch.tensor([info['x_pos'], info['y_vel']])
+
+        log.debug('Finished Evaluation Step')
+        return total_reward.reshape((-1,)), measures.reshape((-1, 2))
+
+    def evaluate_lander_vectorized(self, weights, num_steps):
+        obs_shape, action_shape = self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape
+        agents = [LinearPolicy(obs_shape, action_shape).to(self.device) for _ in range(len(weights))]
+        for agent, w in zip(agents, weights):
+            agent.update_weights(w.T)
+        fmodel, params, buffers = combine_state_for_ensemble(agents)
+
+        # deterministic policies
+        obs = self.vec_env.reset()
+        obs = torch.from_numpy(obs).to(self.device)
+        # obs = obs.repeat_interleave(agents, dim=1)
+        total_reward = np.zeros((len(agents),))
+
+        measures = np.zeros((2, self.vec_env.num_envs))
+        measures_filled = torch.zeros(self.vec_env.num_envs).to(torch.bool)
+        for step in range(num_steps):
+            logits = vmap(fmodel)(params, buffers, obs)
+            obs, rew, dones, infos = self.vec_env.step(logits.detach().cpu().numpy())
+            obs = torch.from_numpy(obs).to(self.device)
+            total_reward += rew
+
+            for i, info in enumerate(infos):
+                bc = info['desc']
+                if bc[0] is not None and not measures_filled[i]:
+                    measures[:, i] = bc
+                    measures_filled[i] = True
+
+            # log.debug(f'Evaluation Step: {step}')
+
+        # If the lunar lander did not land, set the x-pos to the one from the final
+        # timestep, and set the y-vel to the max y-vel (we use min since the lander
+        # goes down).
+        for i, info in enumerate(infos):
+            if not measures_filled[i]:
+                measures[:, i] = torch.tensor([info['x_pos'], info['y_vel']])
 
         log.debug('Finished Evaluation Step')
         return total_reward.reshape((-1,)), measures.reshape((-1, 2))
