@@ -11,6 +11,7 @@ from functorch import vmap, combine_state_for_ensemble
 from envs.vec_env import VecEnv
 from envs.env import make_env
 from utils.utils import log, save_checkpoint
+from utils.vectorized2 import VectorizedPolicy
 from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
 
 
@@ -53,13 +54,6 @@ def gradient_linear(agent):
 class Agent(nn.Module):
     def __init__(self, obs_shape, action_shape: np.ndarray):
         super().__init__()
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
-        )
 
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
@@ -71,8 +65,12 @@ class Agent(nn.Module):
 
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
 
-    def get_value(self, obs):
-        return self.critic(obs)
+    @property
+    def layers(self):
+        return self.actor_mean
+
+    def forward(self, x):
+        return self.actor_mean(x)
 
     def get_action(self, obs, action=None):
         action_mean = self.actor_mean(obs)
@@ -84,22 +82,13 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy()
 
-    def get_action_and_value(self, obs, action=None):
-        action_mean = self.actor_mean(obs)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        cov_mat = torch.diag_embed(action_std)
-        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.critic(obs)
-
 
 class LinearPolicy(nn.Module):
     def __init__(self, obs_shape, action_shape):
         super().__init__()
         self.actor = layer_init(nn.Linear(np.prod(obs_shape),
                                           np.prod(action_shape)))
+        self.layer = nn.Sequential(*[self.actor])
         self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
 
     def get_action(self, obs, action=None):
@@ -111,6 +100,10 @@ class LinearPolicy(nn.Module):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy()
+
+    @property
+    def layers(self):
+        return self.layer
 
     def forward(self, x):
         return self.actor(x)
@@ -144,8 +137,14 @@ class PPO:
         else:
             # self._agent = Agent(self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape).to(
             #     self.device)
-            self._agent = LinearPolicy(self.vec_env.single_observation_space.shape,
-                                       self.vec_env.single_action_space.shape).to(self.device)
+            obs_shape, action_shape = self.vec_env.single_observation_space.shape, \
+                                      self.vec_env.single_action_space.shape
+            agents = [
+                LinearPolicy(obs_shape, action_shape).to(self.device)
+                for _ in range(5)
+            ]
+            self._agent = VectorizedPolicy(agents, LinearPolicy, obs_shape=obs_shape, action_shape=action_shape)\
+                .to(self.device)
             self._critic = GlobalCritic(self.vec_env.single_observation_space.shape).to(self.device)
 
         self.actor_optim = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
@@ -240,7 +239,7 @@ class PPO:
                 dones[step] = next_done.view(-1)
 
                 with torch.no_grad():
-                    action, logprob, _ = self._agent.get_action(next_obs)
+                    action, logprob, _ = self._agent.get_action(next_obs, self._agent.action_logstds)
                     # value = self._critic.get_value(next_obs)
                     # values[step] = value.flatten()
                 actions[step] = action
@@ -295,9 +294,16 @@ class PPO:
                 for start in range(0, self.cfg.batch_size, self.cfg.minibatch_size):
                     end = start + self.cfg.minibatch_size
                     mb_inds = b_inds[start:end]  # grab enough inds for one minibatch
+                    # TODO: fix this hack
+                    mb_size = len(mb_inds)
+                    if mb_size % self._agent.num_models != 0:
+                        r = mb_size // self._agent.num_models
+                        div = int(self._agent.num_models * r)
+                        mb_inds = mb_inds[:div]
 
                     _, newlogprob, entropy = self._agent.get_action(b_obs[mb_inds],
-                                                                    b_actions[mb_inds])
+                                                                    self._agent.action_logstds,
+                                                                    actions=b_actions[mb_inds])
                     newvalue = self._critic.get_value(b_obs_measures[mb_inds])
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
@@ -360,7 +366,8 @@ class PPO:
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            avg_reward = torch.sum(rewards) / self.vec_env.num_envs
+            # avg_reward = torch.sum(rewards) / self.vec_env.num_envs
+            avg_reward = torch.mean(rewards.reshape(traj_len, -1, 6), dim=(0, 2))
             total_reward += avg_reward.detach().cpu().numpy()
 
             if self.cfg.use_wandb:
@@ -382,8 +389,8 @@ class PPO:
         # self.vec_env.close()
         log.debug("Finished PPO training step!")
         f_jacobian = np.array([p.detach().cpu().numpy().ravel() for p in self.agent.parameters()][1]) - original_theta
-        return np.array([total_reward]).reshape((1,)), f_jacobian.reshape(1, -1), \
-               torch.mean(measures, dim=1).detach().cpu().numpy().reshape(1, -1), m_jacobians.reshape((1, 2, -1))
+        return total_reward.reshape((-1,)), f_jacobian.reshape(1, 5, -1), \
+               torch.mean(measures, dim=1).detach().cpu().numpy().reshape(1, 5, -1), m_jacobians.reshape((1, 2, 5, -1))
 
     def evaluate_lander(self, agents, num_steps):
         '''
