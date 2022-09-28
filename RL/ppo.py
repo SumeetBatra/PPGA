@@ -141,9 +141,9 @@ class PPO:
                                       self.vec_env.single_action_space.shape
             agents = [
                 LinearPolicy(obs_shape, action_shape).to(self.device)
-                for _ in range(5)
+                for _ in range(cfg.num_emitters)
             ]
-            self._agent = VectorizedPolicy(agents, LinearPolicy, obs_shape=obs_shape, action_shape=action_shape)\
+            self._agent = VectorizedPolicy(agents, LinearPolicy, obs_shape=obs_shape, action_shape=action_shape) \
                 .to(self.device)
             self._critic = GlobalCritic(self.vec_env.single_observation_space.shape).to(self.device)
 
@@ -249,6 +249,8 @@ class PPO:
                 next_done = torch.from_numpy(next_done).to(self.device)
                 next_obs = torch.from_numpy(next_obs).to(self.device)
                 rewards[step] = torch.from_numpy(reward).squeeze()
+                # rewards[step] = reward.squeeze()
+
                 for i, info in enumerate(infos):
                     bc = info['desc']
                     if bc[0] is not None and not measures_filled[i]:
@@ -389,8 +391,12 @@ class PPO:
         # self.vec_env.close()
         log.debug("Finished PPO training step!")
         f_jacobian = np.array([p.detach().cpu().numpy().ravel() for p in self.agent.parameters()][1]) - original_theta
-        return total_reward.reshape((-1,)), f_jacobian.reshape(1, 5, -1), \
-               torch.mean(measures, dim=1).detach().cpu().numpy().reshape(1, 5, -1), m_jacobians.reshape((1, 2, 5, -1))
+        m_jacobians = m_jacobians.reshape((self.cfg.num_emitters, 2, -1))
+        measures = measures.reshape(self.cfg.num_emitters, 2, -1).mean(dim=2).reshape(5, -1).detach().cpu().numpy()
+        return total_reward.reshape((-1,)), \
+               f_jacobian.reshape(5, -1), \
+               measures, \
+               m_jacobians
 
     def evaluate_lander(self, agents, num_steps):
         '''

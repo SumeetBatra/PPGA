@@ -25,16 +25,20 @@ class Worker(EventLoopObject):
                 if done:
                     self.auto_reset[idx] = True
             obs_tensor, rew_tensor, done_tensor = torch.from_numpy(obs), torch.Tensor([rew]), torch.Tensor([done])
-            obs_rew_done = torch.cat((obs_tensor, rew_tensor, done_tensor))
-            self.res_buffer[self.pid, idx, :] = obs_rew_done
+            if info['desc'][0] is None:
+                measures = torch.BoolTensor([False, False])  # TODO: make this general
+            else:
+                measures = torch.from_numpy(info['desc'])
+            obs_rew_done_measure = torch.cat((obs_tensor, rew_tensor, done_tensor, measures))
+            self.res_buffer[self.pid, idx, :] = obs_rew_done_measure
         self.done_buffer[self.pid] = True
 
     def reset(self):
         for idx, env in enumerate(self.envs):
             obs = env.reset()
             obs = torch.from_numpy(obs)
-            obs_rew_done = torch.cat((obs, torch.Tensor([0]), torch.Tensor([False])))
-            self.res_buffer[self.pid, idx, :] = obs_rew_done
+            obs_rew_done_measures = torch.cat((obs, torch.Tensor([0]), torch.Tensor([False]), torch.Tensor([0, 0])))
+            self.res_buffer[self.pid, idx, :] = obs_rew_done_measures
         self.done_buffer[self.pid] = True
 
     def on_stop(self):

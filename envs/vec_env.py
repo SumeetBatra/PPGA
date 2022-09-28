@@ -24,7 +24,12 @@ class VecEnv(EventLoopObject, gym.Env):
         dummy_env.close()
 
         # each worker will return obs + scalar reward + scalar done flag concatenated together
-        self.res_buffer = torch.zeros((num_workers, envs_per_worker, self.obs_dim + 2)).share_memory_()
+        # TODO: make this general
+        measure_dim = 2
+        reward_dim = 1
+        done_dim = 1
+        total_dims = self.obs_dim + reward_dim + done_dim + measure_dim
+        self.res_buffer = torch.zeros((num_workers, envs_per_worker, total_dims)).share_memory_()
         self.done_buffer = torch.zeros((num_workers,)).share_memory_()
         self.worker_processes = [EventLoopProcess(f'process_{i}') for i in range(num_workers)]
         self.workers = [Worker(cfg,
@@ -56,8 +61,10 @@ class VecEnv(EventLoopObject, gym.Env):
         self.step_signal.emit(action)
         while not all(self.done_buffer):
             ...
-        obs, rew, done = self.res_buffer[:, :, :self.obs_dim], self.res_buffer[:, :, -2], self.res_buffer[:, :, -1]
-        return obs.reshape(self.num_envs, -1), rew.reshape(self.num_envs, -1), done.reshape(self.num_envs, -1), {}
+        obs, rew, done = self.res_buffer[:, :, :self.obs_dim], self.res_buffer[:, :, self.obs_dim + 1], \
+                         self.res_buffer[:, :, self.obs_dim + 2]
+        infos = {'desc': self.res_buffer[:, :, -2:]}
+        return obs.reshape(self.num_envs, -1), rew.reshape(self.num_envs, -1), done.reshape(self.num_envs, -1), infos
 
     def reset(self):
         self.reset_signal.emit()
