@@ -11,8 +11,8 @@ class RunningMeanStd:
     # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
     def __init__(self, epsilon=1e-4, shape=()):
         """Tracks the mean, variance and count of values."""
-        self.mean = np.zeros(shape, "float64")
-        self.var = np.ones(shape, "float64")
+        self.mean = np.zeros(shape, "float32")
+        self.var = np.ones(shape, "float32")
         self.count = epsilon
 
     def update(self, x):

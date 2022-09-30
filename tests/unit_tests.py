@@ -7,6 +7,7 @@ from envs.vec_env import VecEnv
 from utils.utils import log
 from RL.ppo import Agent
 from utils.vectorized2 import VectorizedPolicy
+from models.actor_critic import ActorCriticSeparate, ActorCriticShared
 
 
 def test_vec_env():
@@ -127,6 +128,18 @@ def test_vectorized_to_list():
         # double check all parameters are the same
         assert all_params_equal(m_old, m_new), "Error: not all parameters are the same for the original and returned " \
                                                "model"
+
+
+def test_policy_serialize_deserialize():
+    obs_shape, action_shape = (8,), np.array(2)
+    model1 = ActorCriticShared(obs_shape, action_shape)
+    model2 = ActorCriticShared(obs_shape, action_shape)
+
+    params1 = model1.serialize()
+    model2.deserialize(params1)
+
+    assert validate_state_dicts(model1.state_dict(), model2.state_dict())
+    assert all_params_equal(model1, model2)
 
 # def test_vectorized_stochastic():
 #     random.seed(0)

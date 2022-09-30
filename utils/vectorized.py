@@ -7,7 +7,7 @@ import pickle
 import numpy as np
 
 from torch import Tensor
-from utils.policy import Policy
+from models.policy import Policy
 from utils.utils import log
 from typing import List
 from functools import partial

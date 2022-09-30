@@ -1,9 +1,8 @@
 import torch
-import copy
 import torch.nn as nn
 import numpy as np
 
-from utils.policy import Policy
+from models.policy import StochasticPolicy
 
 
 class VectorizedLinearBlock(nn.Module):
@@ -28,9 +27,9 @@ class VectorizedLinearBlock(nn.Module):
         return y
 
 
-class VectorizedPolicy(Policy):
+class VectorizedPolicy(StochasticPolicy):
     def __init__(self, models, model_fn, **kwargs):
-        Policy.__init__(self)
+        StochasticPolicy.__init__(self)
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.device = torch.device('cuda')  # TODO: fix this

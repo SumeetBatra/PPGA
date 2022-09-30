@@ -1,43 +1,46 @@
 import gym.vector
-import torch
 import numpy as np
 import random
-import torch.nn as nn
 
 import utils.utils
 import wandb
 
+from collections import deque
 from functorch import vmap, combine_state_for_ensemble
 from envs.vec_env import VecEnv
 from envs.env import make_env
 from utils.utils import log, save_checkpoint
 from utils.vectorized2 import VectorizedPolicy
-from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
+from envs.wrappers.normalize_numpy import NormalizeReward, NormalizeObservation
+from models.actor_critic import *
 
 
 # based off of the clean-rl implementation
 # https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_continuous_action.py
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
 def make_vec_env(cfg):
-    # vec_env = VecEnv(cfg,
-    #                  cfg.env_name,
-    #                  num_workers=cfg.num_workers,
-    #                  envs_per_worker=cfg.envs_per_worker)
+    vec_env = VecEnv(cfg,
+                     cfg.env_name,
+                     num_workers=cfg.num_workers,
+                     envs_per_worker=cfg.envs_per_worker)
     # these wrappers are applied at the vecenv level instead of the single env level
     # vec_env = NormalizeObservation(vec_env)
     # vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
 
-    vec_env = gym.vector.AsyncVectorEnv(
-        [make_env(cfg.env_name, cfg.seed + i, cfg.gamma) for i in range(cfg.num_workers)],
-        shared_memory=True
-    )
+    # vec_env = gym.vector.AsyncVectorEnv(
+    #     [make_env(cfg.env_name, cfg.seed + i, cfg.gamma) for i in range(cfg.num_workers)],
+    #     shared_memory=True
+    # )
+    return vec_env
+
+
+def make_vec_env_for_eval(cfg, num_workers, envs_per_worker):
+    vec_env = VecEnv(cfg,
+                     cfg.env_name,
+                     num_workers,
+                     envs_per_worker)
+
     return vec_env
 
 
@@ -51,105 +54,24 @@ def gradient_linear(agent):
     return [p.grad.cpu().detach().numpy().ravel() for p in agent.actor.parameters()][0]
 
 
-class Agent(nn.Module):
-    def __init__(self, obs_shape, action_shape: np.ndarray):
-        super().__init__()
-
-        self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(action_shape)), std=0.01),
-        )
-
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
-
-    @property
-    def layers(self):
-        return self.actor_mean
-
-    def forward(self, x):
-        return self.actor_mean(x)
-
-    def get_action(self, obs, action=None):
-        action_mean = self.actor_mean(obs)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        cov_mat = torch.diag_embed(action_std)
-        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
-
-
-class LinearPolicy(nn.Module):
-    def __init__(self, obs_shape, action_shape):
-        super().__init__()
-        self.actor = layer_init(nn.Linear(np.prod(obs_shape),
-                                          np.prod(action_shape)))
-        self.layer = nn.Sequential(*[self.actor])
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
-
-    def get_action(self, obs, action=None):
-        action_mean = self.actor(obs)
-        action_logstd = self.actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        cov_mat = torch.diag_embed(action_std)
-        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
-
-    @property
-    def layers(self):
-        return self.layer
-
-    def forward(self, x):
-        return self.actor(x)
-
-    def update_weights(self, weights):
-        self.actor.weight.data = weights
-
-
-class GlobalCritic(nn.Module):
-    def __init__(self, obs_shape):
-        super().__init__()
-        self.m_dim = 2  # dimensionality of the measures
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod() + self.m_dim, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
-        )
-
-    def get_value(self, obs):
-        return self.critic(obs)
-
-
 class PPO:
-    def __init__(self, seed, cfg, agent=None):
-        self.vec_env = make_vec_env(cfg)
+    def __init__(self, seed, cfg):
+        # self.vec_env = VecEnv(cfg.env_name,
+        #                       num_workers=cfg.num_workers,
+        #                       envs_per_worker=cfg.envs_per_worker)
+        self.vec_env = gym.vector.AsyncVectorEnv(
+            [make_env(cfg.env_name, seed + i, cfg.gamma) for i in range(cfg.num_workers)]
+        )
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        if agent:
-            self._agent = agent
-        else:
-            # self._agent = Agent(self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape).to(
-            #     self.device)
-            obs_shape, action_shape = self.vec_env.single_observation_space.shape, \
-                                      self.vec_env.single_action_space.shape
-            agents = [
-                LinearPolicy(obs_shape, action_shape).to(self.device)
-                for _ in range(cfg.num_emitters)
-            ]
-            self._agent = VectorizedPolicy(agents, LinearPolicy, obs_shape=obs_shape, action_shape=action_shape) \
-                .to(self.device)
-            self._critic = GlobalCritic(self.vec_env.single_observation_space.shape).to(self.device)
-
-        self.actor_optim = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
-        self.critic_optim = torch.optim.Adam(self._critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self._agent = ActorCriticShared(self.vec_env.single_observation_space.shape,
+                                        self.vec_env.single_action_space.shape).to(self.device)
+        self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
+
+        # metrics for logging
+        self.metric_last_n_window = 10
+        self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
+        self.episodic_returns.append(0)
 
         # seeding
         random.seed(seed)
@@ -159,28 +81,22 @@ class PPO:
 
     @property
     def agent(self):
-        '''
-        Parameterized policy that will interact with the env
-        '''
         return self._agent
 
     @agent.setter
     def agent(self, agent):
-        '''
-        Update the policy
-        :param agent:  New policy
-        '''
         self._agent = agent
+        self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
-    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, traj_len):
+    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length):
         # bootstrap value if not done
         with torch.no_grad():
-            next_value = self._critic.get_value(next_obs).reshape(1, -1).to(self.device)
+            next_value = self._agent.get_value(next_obs).reshape(1, -1).to(self.device)
             # assume we use gae
             advantages = torch.zeros_like(rewards).to(self.device)
             lastgaelam = 0
-            for t in reversed(range(traj_len)):
-                if t == traj_len - 1:
+            for t in reversed(range(rollout_length)):
+                if t == rollout_length - 1:
                     is_next_nonterminal = 1.0 - next_done.long()
                     next_values = next_value
                 else:
@@ -193,31 +109,15 @@ class PPO:
             returns = advantages + values
         return advantages, returns
 
-    def train(self, num_updates, traj_len):
-        num_updates = 1
-        self.actor_optim = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
-
-        obs_shape = self.vec_env.single_observation_space.shape
-        obs_measure_shape = (obs_shape[0] + 2,)
-        obs = torch.zeros((traj_len, self.vec_env.num_envs) +
-                          self.vec_env.single_observation_space.shape).to(self.device)
-        obs_measures = torch.zeros((traj_len, self.vec_env.num_envs) +
-                                   obs_measure_shape).to(self.device)
-        actions = torch.zeros((traj_len, self.vec_env.num_envs) +
-                              self.vec_env.single_action_space.shape).to(self.device)
-        logprobs = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
-        rewards = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
-        dones = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
-        values = torch.zeros((traj_len, self.vec_env.num_envs)).to(self.device)
-        measures = torch.zeros((2, self.vec_env.num_envs), requires_grad=True).to(self.device)
-        measures_filled = torch.zeros(self.vec_env.num_envs).to(torch.bool)
-        total_reward = 0.0
-
-        # original params so we can measure f's jacobian later
-        original_theta = np.array([p.detach().cpu().numpy().ravel() for p in self.agent.parameters()][1])
-        # 2 measures for lunar lander
-        m_jacobians = np.array([[np.zeros_like(p.detach().cpu().numpy().ravel())
-                                 for p in self._agent.actor.parameters()][0] for _ in range(2)])
+    def train(self, num_updates, rollout_length):
+        obs = torch.zeros((rollout_length, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(
+            self.device)
+        actions = torch.zeros((rollout_length, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(
+            self.device)
+        logprobs = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
+        rewards = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
+        dones = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
+        values = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
 
         global_step = 0
         next_obs = self.vec_env.reset()
@@ -230,63 +130,43 @@ class PPO:
             if self.cfg.anneal_lr:
                 frac = 1.0 - (update - 1.0) / num_updates
                 lrnow = frac * self.cfg.learning_rate
-                self.actor_optim.param_groups[0]["lr"] = lrnow
-                self.critic_optim.param_groups[0]["lr"] = lrnow
+                self.optimizer.param_groups[0]["lr"] = lrnow
 
-            for step in range(traj_len):
+            for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done.view(-1)
 
                 with torch.no_grad():
-                    action, logprob, _ = self._agent.get_action(next_obs, self._agent.action_logstds)
-                    # value = self._critic.get_value(next_obs)
-                    # values[step] = value.flatten()
+                    action, logprob, _ = self._agent.get_action(next_obs)
+                    value = self._agent.get_value(next_obs)
+                    values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
 
                 next_obs, reward, next_done, infos = self.vec_env.step(action.cpu().numpy())
-                next_done = torch.from_numpy(next_done).to(self.device)
                 next_obs = torch.from_numpy(next_obs).to(self.device)
-                rewards[step] = torch.from_numpy(reward).squeeze()
-                # rewards[step] = reward.squeeze()
-
-                for i, info in enumerate(infos):
-                    bc = info['desc']
-                    if bc[0] is not None and not measures_filled[i]:
-                        measures[:, i] = torch.tensor(bc).to(self.device)
-                        measures_filled[i] = True
-
-            # If the lunar lander did not land, set the x-pos to the one from the final
-            # timestep, and set the y-vel to the max y-vel (we use min since the lander
-            # goes down).
-            for i, info in enumerate(infos):
-                if not measures_filled[i]:
-                    measures[:, i] = torch.tensor([info['x_pos'], info['y_vel']]).to(self.device)
-
-            for step in range(traj_len):
-                with torch.no_grad():
-                    next_obs = obs[step]
-                    all_obs = torch.cat((next_obs, measures.T), dim=1)
-                    obs_measures[step] = all_obs
-                    value = self._critic.get_value(all_obs)
-                    values[step] = value.flatten()
+                reward = torch.from_numpy(reward).to(self.device)
+                next_done = torch.from_numpy(next_done).to(self.device)
+                # next_obs = next_obs.to(self.device)
+                rewards[step] = reward.squeeze()
 
                 # TODO: logging
-                # log.debug(f'{global_step=}')
-            advantages, returns = self.calculate_rewards(all_obs, next_done, rewards, values, dones, traj_len=traj_len)
+                log.debug(f'{global_step=}')
+                for done, info in zip(next_done, infos):
+                    if done:
+                        self.episodic_returns.append(info['total_reward'])
+
+            advantages, returns = self.calculate_rewards(next_obs, next_done, rewards, values, dones,
+                                                         rollout_length=rollout_length)
 
             # flatten the batch
             b_obs = obs.reshape((-1,) + self.vec_env.single_observation_space.shape)
-            b_obs_measures = obs_measures.reshape((-1,) + (self.vec_env.single_observation_space.shape[0] + 2,))
             b_logprobs = logprobs.reshape(-1)
             b_actions = actions.reshape((-1,) + self.vec_env.single_action_space.shape)
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
-
-            # measures for QD
-            measures_avg = torch.mean(measures, dim=1).reshape(-1, 1)
 
             # optimize the policy and value network
             b_inds = torch.arange(self.cfg.batch_size)
@@ -296,17 +176,10 @@ class PPO:
                 for start in range(0, self.cfg.batch_size, self.cfg.minibatch_size):
                     end = start + self.cfg.minibatch_size
                     mb_inds = b_inds[start:end]  # grab enough inds for one minibatch
-                    # TODO: fix this hack
-                    mb_size = len(mb_inds)
-                    if mb_size % self._agent.num_models != 0:
-                        r = mb_size // self._agent.num_models
-                        div = int(self._agent.num_models * r)
-                        mb_inds = mb_inds[:div]
 
                     _, newlogprob, entropy = self._agent.get_action(b_obs[mb_inds],
-                                                                    self._agent.action_logstds,
-                                                                    actions=b_actions[mb_inds])
-                    newvalue = self._critic.get_value(b_obs_measures[mb_inds])
+                                                                    b_actions[mb_inds])
+                    newvalue = self._agent.get_value(b_obs[mb_inds])
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -324,10 +197,6 @@ class PPO:
                     pg_loss1 = -mb_advantages * ratio
                     pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - self.cfg.clip_coef, 1 + self.cfg.clip_coef)
                     pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-                    # measure loss
-                    measures_loss = -measures_avg * ratio
-                    measures_loss = torch.mean(measures_loss, dim=1)
 
                     # value loss
                     newvalue = newvalue.view(-1)
@@ -347,18 +216,10 @@ class PPO:
                     entropy_loss = entropy.mean()
                     loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
 
-                    self.actor_optim.zero_grad()
-                    self.critic_optim.zero_grad()
-                    for i, m_loss in enumerate(measures_loss):
-                        torch.autograd.backward(m_loss, retain_graph=True, inputs=[p for p in self.agent.parameters()])
-                        m_jacobians[i] += gradient_linear(self.agent)
-                        self.actor_optim.zero_grad()
-
+                    self.optimizer.zero_grad()
                     loss.backward()
                     nn.utils.clip_grad_norm_(self._agent.parameters(), self.cfg.max_grad_norm)
-                    nn.utils.clip_grad_norm_(self._critic.parameters(), self.cfg.max_grad_norm)
-                    self.actor_optim.step()
-                    self.critic_optim.step()
+                    self.optimizer.step()
 
                 if self.cfg.target_kl is not None:
                     if approx_kl > self.cfg.target_kl:
@@ -368,13 +229,9 @@ class PPO:
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            # avg_reward = torch.sum(rewards) / self.vec_env.num_envs
-            avg_reward = torch.mean(rewards.reshape(traj_len, -1, 6), dim=(0, 2))
-            total_reward += avg_reward.detach().cpu().numpy()
-
             if self.cfg.use_wandb:
                 wandb.log({
-                    "charts/learning_rate": self.actor_optim.param_groups[0]['lr'],
+                    "charts/learning_rate": self.optimizer.param_groups[0]['lr'],
                     "losses/value_loss": v_loss.item(),
                     "losses/policy_loss": pg_loss.item(),
                     "losses/entropy": entropy_loss.item(),
@@ -382,21 +239,48 @@ class PPO:
                     "losses/approx_kl": approx_kl.item(),
                     "losses/clipfrac": np.mean(clipfracs),
                     "losses/explained_variance": explained_var,
-                    "RL/average_reward": torch.sum(rewards) / self.vec_env.num_envs,
+                    f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
                     "Env step": global_step
                 })
-        # log.debug("Saving checkpoint...")
-        # save_checkpoint('checkpoints', 'checkpoint0', self._agent, self.actor_optim)
-        # self.vec_env.stop.emit()
-        # self.vec_env.close()
-        log.debug("Finished PPO training step!")
-        f_jacobian = np.array([p.detach().cpu().numpy().ravel() for p in self.agent.parameters()][1]) - original_theta
-        m_jacobians = m_jacobians.reshape((self.cfg.num_emitters, 2, -1))
-        measures = measures.reshape(self.cfg.num_emitters, 2, -1).mean(dim=2).reshape(5, -1).detach().cpu().numpy()
-        return total_reward.reshape((-1,)), \
-               f_jacobian.reshape(5, -1), \
-               measures, \
-               m_jacobians
+        log.debug("Saving checkpoint...")
+        save_checkpoint('checkpoints', 'checkpoint0', self._agent, self.optimizer)
+        self.vec_env.stop.emit()
+        log.debug("Done!")
+
+    def evaluate(self, vec_agent: VectorizedPolicy):
+        '''
+        Evaluate all agents for one episode using deterministic actions and collect measures
+        :param vec_agent: Vectorized agents for vectorized inference
+        :returns: Sum rewards and measures for all agents
+        '''
+
+        # TODO: untested and definitely doesn't work. Need to implement all interfaces
+
+        # kill the previous processes to save memory
+        self.vec_env.close()
+        # resize vec env s.t. there is one env per agent
+        self.vec_env = make_vec_env_for_eval(self.cfg, vec_agent.num_models, envs_per_worker=1)
+
+        total_reward = np.zeros((vec_agent.num_models,))
+        measures = np.zeros((self.cfg.num_dims, vec_agent.num_models))
+
+        obs = self.vec_env.reset()
+        obs = obs.to(self.device)
+        dones = torch.BoolTensor([False for _ in range(self.vec_env.num_envs)])
+
+        while not all(dones):
+            acts = vec_agent(obs)
+            obs, rew, next_dones, infos = self.vec_env.step(acts.detach().cpu().numpy())
+            obs = obs.to(self.device)
+            total_reward += rew.detach().cpu().numpy()
+            dones = torch.logical_or(dones, next_dones)
+
+        # get the final measures stored in the infos from the final timestep
+        measures = infos['bc'].detach().cpu().numpy()
+
+        log.debug('Finished Evaluation Step')
+
+        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)
 
     def evaluate_lander(self, agents, num_steps):
         '''
@@ -427,7 +311,7 @@ class PPO:
             total_reward += rew
 
             for i, info in enumerate(infos):
-                bc = info['desc']
+                bc = info['bc']
                 if bc[0] is not None and not measures_filled[i]:
                     measures[:, i] = bc
                     measures_filled[i] = True
@@ -466,7 +350,7 @@ class PPO:
             total_reward += rew
 
             for i, info in enumerate(infos):
-                bc = info['desc']
+                bc = info['bc']
                 if bc[0] is not None and not measures_filled[i]:
                     measures[:, i] = bc
                     measures_filled[i] = True

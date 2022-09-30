@@ -24,7 +24,7 @@ def parse_args():
                              'Should always be <= number of logical cores on your machine')
     parser.add_argument('--envs_per_worker', type=int, default=1,
                         help='Num envs each worker process will step through sequentially')
-    parser.add_argument('--num_steps', type=int, default=2048,
+    parser.add_argument('--rollout_length', type=int, default=2048,
                         help='the number of steps to run in each environment per policy rollout')
     # ppo hyperparams
     parser.add_argument('--learning_rate', type=float, default=3e-4)
@@ -48,9 +48,14 @@ def parse_args():
                         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target_kl", type=float, default=None,
                         help="the target KL divergence threshold")
+    # QD Params
+    parser.add_argument("--algorithm", type=str, choices=['qdrl', 'ppo'])
+    parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
+                                                                    " CMA-ES instances exploring the archive")
+    parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
 
     args = parser.parse_args()
-    args.batch_size = int(args.num_workers * args.envs_per_worker * args.num_steps)
+    args.batch_size = int(args.num_workers * args.envs_per_worker * args.rollout_length)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     cfg = AttrDict(vars(args))
     return cfg
@@ -64,5 +69,5 @@ if __name__ == '__main__':
 
     alg = PPO(cfg.seed, cfg)
     num_updates = cfg.total_timesteps // cfg.batch_size
-    alg.train(num_updates, traj_len=cfg.num_steps)
+    alg.train(num_updates, rollout_length=cfg.rollout_length)
     sys.exit(0)

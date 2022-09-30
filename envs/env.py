@@ -2,7 +2,7 @@ import gym
 import QDgym
 import numpy as np
 from envs.wrappers.normalize_numpy import NormalizeObservation, NormalizeReward
-from envs.wrappers.reward import ForwardReward
+from envs.wrappers.reward import ForwardReward, TotalReward
 
 
 def make_env(env_id, seed, gamma):
@@ -14,5 +14,6 @@ def make_env(env_id, seed, gamma):
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        env = TotalReward(env)
         return env
     return thunk
