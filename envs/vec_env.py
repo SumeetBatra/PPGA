@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import gym
 import numpy as np
@@ -25,14 +27,15 @@ class VecEnv(EventLoopObject, gym.Env):
         self.action_space = dummy_env.action_space
         dummy_env.close()
 
-        # each worker will return obs + scalar reward + scalar done flag concatenated together
-        # TODO: make this general
-        measure_dim = 2
+        # each worker will return obs + scalar reward + scalar done flag + n-dim measures concatenated together
+        self.measure_dim = cfg.num_dims
         reward_dim = 1
         done_dim = 1
-        total_dims = self.obs_dim + reward_dim + done_dim + measure_dim
+        total_dims = self.obs_dim + reward_dim + done_dim
         self.res_buffer = torch.zeros((num_workers, envs_per_worker, total_dims)).share_memory_()
         self.done_buffer = torch.zeros((num_workers,)).share_memory_()
+        self.infos = {'total_reward': torch.zeros(num_workers, envs_per_worker).share_memory_(),
+                      'bc': torch.zeros((num_workers, envs_per_worker, self.measure_dim)).share_memory_()}
         self.worker_processes = [EventLoopProcess(f'process_{i}') for i in range(num_workers)]
         self.workers = [Worker(cfg,
                                i,
@@ -40,6 +43,7 @@ class VecEnv(EventLoopObject, gym.Env):
                                f'worker_{self.worker_processes[i].object_id}',
                                self.res_buffer,
                                self.done_buffer,
+                               self.infos,
                                render=False,
                                num_envs=envs_per_worker) for i in range(num_workers)]
         self.num_envs = num_workers * envs_per_worker
@@ -71,17 +75,22 @@ class VecEnv(EventLoopObject, gym.Env):
         self.step_signal.emit(action)
         while not all(self.done_buffer):
             ...
-        obs, rew, done = self.res_buffer[:, :, :self.obs_dim], self.res_buffer[:, :, self.obs_dim + 1], \
-                         self.res_buffer[:, :, self.obs_dim + 2]
-        infos = {'desc': self.res_buffer[:, :, -2:]}
-        return obs.reshape(self.num_envs, -1), rew.reshape(self.num_envs, -1), done.reshape(self.num_envs, -1), infos
+        res = self.res_buffer.detach().clone().reshape(self.num_envs, -1)
+        obs, rew, done = res[:, :self.obs_dim], res[:, self.obs_dim], res[:, self.obs_dim + 1]
+        infos = {}
+        for key, value in self.infos.items():
+            infos[key] = value.reshape(self.num_envs, -1).detach().clone()
+        # reset the done buffers
+        self.done_buffer[:] = 0
+        return obs, rew, done, infos
 
     def reset(self):
         self.reset_signal.emit()
         while not all(self.done_buffer):
             ...
-        obs, rew, done = self.res_buffer[:, :, :self.obs_dim], self.res_buffer[:, :, -2], self.res_buffer[:, :, -1]
-        return obs.reshape(self.num_envs, -1)
+        obs = self.res_buffer[:, :, :self.obs_dim]
+        self.done_buffer[:] = 0
+        return obs.reshape(self.num_envs, -1).detach().clone()
 
     def connect_signals_to_slots(self):
         if self.double_buffered_sampling:

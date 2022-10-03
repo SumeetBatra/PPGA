@@ -1,7 +1,7 @@
 import gym.vector
 import numpy as np
 import random
-
+import time
 import utils.utils
 import wandb
 
@@ -56,12 +56,10 @@ def gradient_linear(agent):
 
 class PPO:
     def __init__(self, seed, cfg):
-        # self.vec_env = VecEnv(cfg.env_name,
-        #                       num_workers=cfg.num_workers,
-        #                       envs_per_worker=cfg.envs_per_worker)
-        self.vec_env = gym.vector.AsyncVectorEnv(
-            [make_env(cfg.env_name, seed + i, cfg.gamma) for i in range(cfg.num_workers)]
-        )
+        self.vec_env = make_vec_env(cfg)
+        # self.vec_env = gym.vector.AsyncVectorEnv(
+        #     [make_env(cfg.env_name, seed + i, cfg.gamma) for i in range(cfg.num_workers)]
+        # )
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self._agent = ActorCriticShared(self.vec_env.single_observation_space.shape,
                                         self.vec_env.single_action_space.shape).to(self.device)
@@ -72,6 +70,8 @@ class PPO:
         self.metric_last_n_window = 10
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
         self.episodic_returns.append(0)
+        self._report_interval = 5.0  # report returns every 5 seconds
+        self._last_interval = 0.0
 
         # seeding
         random.seed(seed)
@@ -121,8 +121,8 @@ class PPO:
 
         global_step = 0
         next_obs = self.vec_env.reset()
-        next_obs = torch.from_numpy(next_obs).to(self.device)
-        # next_obs = next_obs.to(self.device)
+        # next_obs = torch.from_numpy(next_obs).to(self.device)
+        next_obs = next_obs.to(self.device)
         next_done = torch.zeros(self.vec_env.num_envs).to(self.device)
 
         for update in range(1, num_updates + 1):
@@ -145,17 +145,18 @@ class PPO:
                 logprobs[step] = logprob
 
                 next_obs, reward, next_done, infos = self.vec_env.step(action.cpu().numpy())
-                next_obs = torch.from_numpy(next_obs).to(self.device)
-                reward = torch.from_numpy(reward).to(self.device)
-                next_done = torch.from_numpy(next_done).to(self.device)
-                # next_obs = next_obs.to(self.device)
+                next_obs = next_obs.to(self.device)
                 rewards[step] = reward.squeeze()
 
                 # TODO: logging
-                log.debug(f'{global_step=}')
-                for done, info in zip(next_done, infos):
+                # log.debug(f'{global_step=}')
+                for i, done in enumerate(next_done.flatten()):
                     if done:
-                        self.episodic_returns.append(info['total_reward'])
+                        total_reward = infos['total_reward'][i]
+                        log.debug(f'{total_reward=}')
+                        # if total_reward < 10:
+                        #     log.error(f'{total_reward=}')
+                        self.episodic_returns.append(infos['total_reward'][i])
 
             advantages, returns = self.calculate_rewards(next_obs, next_done, rewards, values, dones,
                                                          rollout_length=rollout_length)
