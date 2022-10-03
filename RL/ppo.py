@@ -11,7 +11,7 @@ from envs.vec_env import VecEnv
 from envs.env import make_env
 from utils.utils import log, save_checkpoint
 from utils.vectorized2 import VectorizedPolicy
-from envs.wrappers.normalize_numpy import NormalizeReward, NormalizeObservation
+from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
 from models.actor_critic import *
 
 
@@ -25,8 +25,8 @@ def make_vec_env(cfg):
                      num_workers=cfg.num_workers,
                      envs_per_worker=cfg.envs_per_worker)
     # these wrappers are applied at the vecenv level instead of the single env level
-    # vec_env = NormalizeObservation(vec_env)
-    # vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
+    vec_env = NormalizeObservation(vec_env)
+    vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
 
     # vec_env = gym.vector.AsyncVectorEnv(
     #     [make_env(cfg.env_name, cfg.seed + i, cfg.gamma) for i in range(cfg.num_workers)],

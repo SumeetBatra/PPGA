@@ -36,3 +36,21 @@ class TotalReward(gym.core.RewardWrapper):
         self.total_reward = 0
         obs = self.env.reset()
         return obs
+
+
+class QDReward(gym.core.RewardWrapper):
+    '''
+    Here, we treat the QD measures as reward functions for QDRL algorithms. Instead of just collecting statistics
+    on the final measures after a complete episode, we also collect info on measures on each timestep and treat
+    them as reward scalars
+    '''
+    def __init__(self, env):
+        super().__init__(env)
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        measures = self.robot.feet_contact
+        info['measures'] = measures
+        return obs, rew, done, info
+
+
