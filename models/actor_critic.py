@@ -93,6 +93,10 @@ class ActorCriticShared(StochasticPolicy):
 
         self._actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
 
+    @property
+    def actor_logstd(self):
+        return self._actor_logstd
+
     def get_action(self, obs, action=None):
         core_out = self.core(obs)
         action_mean = self.actor_head(core_out)

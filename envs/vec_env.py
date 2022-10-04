@@ -35,7 +35,10 @@ class VecEnv(EventLoopObject, gym.Env):
         self.res_buffer = torch.zeros((num_workers, envs_per_worker, total_dims)).share_memory_()
         self.done_buffer = torch.zeros((num_workers,)).share_memory_()
         self.infos = {'total_reward': torch.zeros(num_workers, envs_per_worker).share_memory_(),
-                      'bc': torch.zeros((num_workers, envs_per_worker, self.measure_dim)).share_memory_()}
+                      # final measures averaged over length of trajectory (non-markovian)
+                      'bc': torch.zeros((num_workers, envs_per_worker, self.measure_dim)).share_memory_(),
+                      # per timestep measure (markovian??)
+                      'measures': torch.zeros((num_workers, envs_per_worker, self.measure_dim)).share_memory_()}
         self.worker_processes = [EventLoopProcess(f'process_{i}') for i in range(num_workers)]
         self.workers = [Worker(cfg,
                                i,

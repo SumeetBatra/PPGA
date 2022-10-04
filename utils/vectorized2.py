@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 
 from models.policy import StochasticPolicy
+from typing import List
 
 
 class VectorizedLinearBlock(nn.Module):
@@ -38,7 +39,7 @@ class VectorizedPolicy(StochasticPolicy):
         self.blocks = self._vectorize_models(models)
         self.layers = nn.Sequential(*self.blocks)
         self.action_logstds = None
-        if hasattr(models[0], 'actor_logstd'):
+        if hasattr(models[0], '_actor_logstd'):
             action_logprobs = [model.actor_logstd for model in models]
             self.action_logstds = nn.Parameter(torch.cat(action_logprobs)).to(self.device)
         self.kwargs = kwargs
@@ -61,10 +62,6 @@ class VectorizedPolicy(StochasticPolicy):
                 blocks.append(nonlinear)
         return blocks
 
-    @property
-    def actor(self):  # TODO: refactor this into a subclass
-        return self.layers
-
     def models_list(self):
         '''
         Returns a list of models view of the object
@@ -86,3 +83,72 @@ class VectorizedPolicy(StochasticPolicy):
 
     def forward(self, x):
         return self.layers(x)
+
+
+class VectorizedActorCriticShared(StochasticPolicy):
+    def __init__(self, models, model_fn, **kwargs):
+        StochasticPolicy.__init__(self)
+        if not isinstance(models, np.ndarray):
+            models = np.array(models)
+        self.device = torch.device('cuda')  # TODO: fix this
+        self.num_models = len(models)
+        self.model_fn = model_fn
+        self.core_blocks, self.actor_head_blocks, self.critic_head_blocks = self._vectorize_layers('core', models), \
+                                                                            self._vectorize_layers('actor_head',
+                                                                                                   models), \
+                                                                            self._vectorize_layers('critic_head',
+                                                                                                   models)
+        self.core, self.actor_head, self.critic_head = nn.Sequential(*self.core_blocks), \
+                                                       nn.Sequential(*self.actor_head_blocks), \
+                                                       nn.Sequential(*self.critic_head_blocks)
+        action_logprobs = [model.actor_logstd for model in models]
+        self._actor_logstd = nn.Parameter(torch.cat(action_logprobs)).to(self.device)
+        self.kwargs = kwargs
+
+    def _vectorize_layers(self, layer_name, models):
+        '''
+        Vectorize a specific nn.Sequential list of layers across all models of homogenous architecture
+        :param layer_name: name of a nn.Sequential block
+        :return: vectorized nn.Sequential block
+        '''
+        assert hasattr(models[0], layer_name), f'{layer_name=} not in the model'
+        all_models_layers = [getattr(models[i], layer_name) for i in range(self.num_models)]
+        num_layers = len(getattr(models[0], layer_name))
+        blocks = []
+        for i in range(0, num_layers):
+            if not isinstance(all_models_layers[0][i], nn.Linear):
+                continue
+            weights_slice = [all_models_layers[j][i].weight.to(self.device) for j in range(self.num_models)]
+            bias_slice = [all_models_layers[j][i].bias.to(self.device) for j in range(self.num_models)]
+
+            weights_slice = torch.stack(weights_slice)
+            bias_slice = torch.stack(bias_slice)
+            nonlinear = all_models_layers[0][i + 1] if i + 1 < num_layers else None
+            block = VectorizedLinearBlock(weights_slice, bias_slice)
+            blocks.append(block)
+            if nonlinear is not None:
+                blocks.append(nonlinear)
+        return blocks
+
+    def get_action(self, obs, action=None):
+        core_out = self.core(obs)
+        action_mean = self.actor_head(core_out)
+        repeats = obs.shape[0] // self.num_models
+        action_logstd = torch.repeat_interleave(self._actor_logstd, repeats, dim=0)
+        action_logstd = action_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        cov_mat = torch.diag_embed(action_std)
+        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy()
+
+    def get_value(self, obs):
+        core_out = self.core(obs)
+        value = self.critic_head(core_out)
+        return value
+
+    def forward(self, obs):
+        '''Gets the raw logits from the actor head. Treats the policy as deterministic'''
+        core_out = self.core(obs)
+        return self.actor_head(core_out)

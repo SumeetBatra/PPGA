@@ -10,7 +10,7 @@ from functorch import vmap, combine_state_for_ensemble
 from envs.vec_env import VecEnv
 from envs.env import make_env
 from utils.utils import log, save_checkpoint
-from utils.vectorized2 import VectorizedPolicy
+from utils.vectorized2 import VectorizedActorCriticShared
 from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
 from models.actor_critic import *
 
@@ -27,11 +27,6 @@ def make_vec_env(cfg):
     # these wrappers are applied at the vecenv level instead of the single env level
     vec_env = NormalizeObservation(vec_env)
     vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
-
-    # vec_env = gym.vector.AsyncVectorEnv(
-    #     [make_env(cfg.env_name, cfg.seed + i, cfg.gamma) for i in range(cfg.num_workers)],
-    #     shared_memory=True
-    # )
     return vec_env
 
 
@@ -57,12 +52,11 @@ def gradient_linear(agent):
 class PPO:
     def __init__(self, seed, cfg):
         self.vec_env = make_vec_env(cfg)
-        # self.vec_env = gym.vector.AsyncVectorEnv(
-        #     [make_env(cfg.env_name, seed + i, cfg.gamma) for i in range(cfg.num_workers)]
-        # )
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self._agent = ActorCriticShared(self.vec_env.single_observation_space.shape,
-                                        self.vec_env.single_action_space.shape).to(self.device)
+        obs_shape = self.vec_env.single_observation_space.shape
+        action_shape = self.vec_env.single_action_space.shape
+        agent = [ActorCriticShared(obs_shape, action_shape).to(self.device)]
+        self._agent = VectorizedActorCriticShared(agent, ActorCriticShared, obs_shape=obs_shape, action_shape=action_shape)
         self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
@@ -118,6 +112,7 @@ class PPO:
         rewards = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
         dones = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
         values = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
+        measures = torch.zeros((rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
 
         global_step = 0
         next_obs = self.vec_env.reset()
@@ -147,6 +142,8 @@ class PPO:
                 next_obs, reward, next_done, infos = self.vec_env.step(action.cpu().numpy())
                 next_obs = next_obs.to(self.device)
                 rewards[step] = reward.squeeze()
+                # TODO: validate
+                measures = infos['measures']
 
                 # TODO: logging
                 # log.debug(f'{global_step=}')
@@ -248,7 +245,7 @@ class PPO:
         self.vec_env.stop.emit()
         log.debug("Done!")
 
-    def evaluate(self, vec_agent: VectorizedPolicy):
+    def evaluate(self, vec_agent):
         '''
         Evaluate all agents for one episode using deterministic actions and collect measures
         :param vec_agent: Vectorized agents for vectorized inference
@@ -282,52 +279,6 @@ class PPO:
         log.debug('Finished Evaluation Step')
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)
-
-    def evaluate_lander(self, agents, num_steps):
-        '''
-        Evaluate the objective and measures on a batch of agents
-        :param num_steps: num steps to evaluate against
-        :param agents: batch of policies
-        :return: objective and measure scores for all agents
-        '''
-        # TODO: eventually this will be nn-policies. Will need to vmap them
-        #  or use the vectorized-inference implementation
-
-        # deterministic policies
-        obs = self.vec_env.reset()
-        obs = torch.from_numpy(obs).to(self.device)
-        # obs = obs.repeat_interleave(agents, dim=1)
-        total_reward = np.zeros((len(agents),))
-
-        measures = np.zeros((2, self.vec_env.num_envs))
-        measures_filled = torch.zeros(self.vec_env.num_envs).to(torch.bool)
-        for step in range(num_steps):
-            all_logits = []
-            for i, agent in enumerate(agents):
-                logits = obs[i] @ agent
-                all_logits.append(logits)
-            all_logits = torch.concat(all_logits).reshape(-1, 2)
-            obs, rew, dones, infos = self.vec_env.step(all_logits.detach().cpu().numpy())
-            obs = torch.from_numpy(obs).to(self.device)
-            total_reward += rew
-
-            for i, info in enumerate(infos):
-                bc = info['bc']
-                if bc[0] is not None and not measures_filled[i]:
-                    measures[:, i] = bc
-                    measures_filled[i] = True
-
-            # log.debug(f'Evaluation Step: {step}')
-
-        # If the lunar lander did not land, set the x-pos to the one from the final
-        # timestep, and set the y-vel to the max y-vel (we use min since the lander
-        # goes down).
-        for i, info in enumerate(infos):
-            if not measures_filled[i]:
-                measures[:, i] = torch.tensor([info['x_pos'], info['y_vel']])
-
-        log.debug('Finished Evaluation Step')
-        return total_reward.reshape((-1,)), measures.reshape((-1, 2))
 
     def evaluate_lander_vectorized(self, weights, num_steps):
         obs_shape, action_shape = self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape

@@ -6,7 +6,7 @@ from time import time
 from envs.vec_env import VecEnv
 from utils.utils import log
 from RL.ppo import Agent
-from utils.vectorized2 import VectorizedPolicy
+from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared
 from models.actor_critic import ActorCriticSeparate, ActorCriticShared
 
 
@@ -128,6 +128,29 @@ def test_vectorized_to_list():
         # double check all parameters are the same
         assert all_params_equal(m_old, m_new), "Error: not all parameters are the same for the original and returned " \
                                                "model"
+
+
+def test_vectorized_actor_critic_shared_weights():
+    device = torch.device('cuda')
+    obs_shape, action_shape = (8,), np.array(2)
+    models = [ActorCriticShared(obs_shape, action_shape).to(device) for _ in range(10)]
+    vec_model = VectorizedActorCriticShared(models, ActorCriticShared, obs_shape=obs_shape, action_shape=action_shape)
+    obs = torch.randn((10, 8)).to(device)
+
+    acts_for_loop, vals_for_loop = [], []
+    for model, o in zip(models, obs):
+        act = model(o)
+        val = model.get_value(o)
+        acts_for_loop.append(act)
+        vals_for_loop.append(val)
+    acts_for_loop = torch.cat(acts_for_loop).flatten()
+    vals_for_loop = torch.cat(vals_for_loop).flatten()
+
+    acts_vec = vec_model(obs.to(device)).flatten()
+    vals_vec = vec_model.get_value(obs.to(device)).flatten()
+
+    assert torch.allclose(acts_vec, acts_for_loop)
+    assert torch.allclose(vals_vec, vals_for_loop)
 
 
 def test_policy_serialize_deserialize():
