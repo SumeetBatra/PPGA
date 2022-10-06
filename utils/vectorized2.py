@@ -4,6 +4,7 @@ import numpy as np
 
 from models.policy import StochasticPolicy
 from typing import List
+from utils.normalize_obs import NormalizeReward, NormalizeObservation
 
 
 class VectorizedLinearBlock(nn.Module):
@@ -30,7 +31,8 @@ class VectorizedLinearBlock(nn.Module):
 
 class VectorizedPolicy(StochasticPolicy):
     def __init__(self, models, model_fn, **kwargs):
-        StochasticPolicy.__init__(self, normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
+        StochasticPolicy.__init__(self, normalize_obs=kwargs.get('normalize_obs', False),
+                                  normalize_rewards=kwargs.get('normalize_rewards', False))
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.device = torch.device('cuda')  # TODO: fix this
@@ -86,10 +88,11 @@ class VectorizedPolicy(StochasticPolicy):
 
 
 class VectorizedActorCriticShared(StochasticPolicy):
-    def __init__(self, models, model_fn, **kwargs):
-        StochasticPolicy.__init__(self, normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
+    def __init__(self, cfg, models, model_fn, **kwargs):
+        StochasticPolicy.__init__(self, cfg)
         if not isinstance(models, np.ndarray):
             models = np.array(models)
+        self.cfg = cfg
         self.device = torch.device('cuda')  # TODO: fix this
         self.num_models = len(models)
         self.model_fn = model_fn
@@ -104,6 +107,11 @@ class VectorizedActorCriticShared(StochasticPolicy):
         action_logprobs = [model.actor_logstd for model in models]
         self._actor_logstd = nn.Parameter(torch.cat(action_logprobs)).to(self.device)
         self.kwargs = kwargs
+
+        if cfg.normalize_obs:
+            self.obs_normalizers = [model.obs_normalizer for model in models]
+        if cfg.normalize_rewards:
+            self.rew_normalizers = [model.reward_normalizer for model in models]
 
     def _vectorize_layers(self, layer_name, models):
         '''
@@ -152,3 +160,70 @@ class VectorizedActorCriticShared(StochasticPolicy):
         '''Gets the raw logits from the actor head. Treats the policy as deterministic'''
         core_out = self.core(obs)
         return self.actor_head(core_out)
+
+    def vec_normalize_obs(self, obs):
+        # TODO: make this properly vectorized
+        obs = obs.reshape(self.num_models, obs.shape[0] // self.num_models, -1)
+        for i, (model_obs, normalizer) in enumerate(zip(obs, self.obs_normalizers)):
+            obs[i] = normalizer(model_obs)
+        return obs.reshape(-1, obs.shape[-1])
+
+    def vec_normalize_rewards(self, rewards, next_done):
+        # TODO: make this properly vectorized
+        envs_per_model = self.cfg.envs_per_model
+        rewards = rewards.reshape(self.num_models, envs_per_model)
+        next_dones = next_done.reshape(self.num_models, envs_per_model)
+        for i, (model_rews, dones, normalizer) in enumerate(zip(rewards, next_dones, self.rew_normalizers)):
+            rewards[i] = normalizer(model_rews, dones)
+        return rewards.reshape(-1)
+
+    def vec_to_models(self):
+        '''
+        Inverse operation of _vectorize_layers
+        '''
+        models = [self.model_fn(cfg=self.cfg, num_dims=self.cfg.num_dims, **self.kwargs) for _ in range(self.num_models)]
+        for i, model in enumerate(models):
+            # update weights of each model core
+            for l, layer in enumerate(self.core):
+                # layer could be a nonlinearity
+                if not isinstance(layer, VectorizedLinearBlock):
+                    continue
+                model.core[l].weight.data = layer.weight.data[i]
+                model.core[l].bias.data = layer.bias.data[i]
+
+            # update weights of each head
+            model.actor_head[0].weight.data = self.actor_head[0].weight.data[i]
+            model.actor_head[0].bias.data = self.actor_head[0].bias.data[i]
+            model.critic_head[0].weight.data = self.critic_head[0].weight.data[i]
+            model.critic_head[0].bias.data = self.critic_head[0].bias.data[i]
+
+            # update the obs/rew normalizers if enabled
+            if self.cfg.normalize_obs:
+                model.obs_normalizer = self.obs_normalizers[i]
+            if self.cfg.normalize_rewards:
+                model.reward_normalizer = self.rew_normalizers[i]
+
+            # update the action-logstd params
+            model._actor_logstd.data = self._actor_logstd[i]
+
+        return models
+
+
+class QDVectorizedActorCriticShared(VectorizedActorCriticShared):
+    def __init__(self, cfg, models, model_fn, measure_dims, **kwargs):
+        VectorizedActorCriticShared.__init__(self, cfg, models, model_fn, **kwargs)
+        self.measure_dims = measure_dims
+        self.measure_critic_head_blocks = self._vectorize_layers('measure_critic_heads', models)
+        self.measure_critic_heads = nn.Sequential(*self.measure_critic_head_blocks)
+
+    def get_measure_values(self, obs):
+        core_out = self.core(obs)
+        measure_values = self.measure_critic_heads(core_out)
+        return measure_values
+
+    def vec_to_models(self):
+        models = super(QDVectorizedActorCriticShared, self).vec_to_models()
+        for i, model in enumerate(models):
+            model.measure_critic_heads[0].weight.data = self.measure_critic_heads[0].weight.data[i]
+            model.measure_critic_heads[0].bias.data = self.measure_critic_heads[0].bias.data[i]
+        return models

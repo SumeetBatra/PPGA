@@ -4,6 +4,7 @@ import random
 import time
 
 import torch
+import torch.nn as nn
 
 import utils.utils
 import wandb
@@ -13,9 +14,9 @@ from functorch import vmap, combine_state_for_ensemble
 from envs.vec_env import VecEnv
 from envs.env import make_env
 from utils.utils import log, save_checkpoint
-from utils.vectorized2 import VectorizedActorCriticShared
+from utils.vectorized2 import VectorizedActorCriticShared, QDVectorizedActorCriticShared
 from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
-from models.actor_critic import *
+from models.actor_critic import QDActorCriticShared, ActorCriticShared
 
 
 # based off of the clean-rl implementation
@@ -60,9 +61,9 @@ class PPO:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         obs_shape = self.vec_env.single_observation_space.shape
         action_shape = self.vec_env.single_action_space.shape
-        # agent = [ActorCriticShared(obs_shape, action_shape).to(self.device)]
-        # self._agent = VectorizedActorCriticShared(agent, ActorCriticShared, obs_shape=obs_shape, action_shape=action_shape)
-        self._agent = ActorCriticShared(cfg, obs_shape, action_shape).to(self.device)
+        agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
+        self._agent = QDVectorizedActorCriticShared(cfg, [agent], QDActorCriticShared, cfg.num_dims).to(self.device)
+        # self._agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
         self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
@@ -80,15 +81,18 @@ class PPO:
         torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
         # initialize tensors for training
-        self.obs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(
+        self.obs = torch.zeros(
+            (cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(
             self.device)
-        self.actions = torch.zeros((cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(
+        self.actions = torch.zeros(
+            (cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(
             self.device)
         self.logprobs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.rewards = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.dones = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
+        self.measure_values = torch.zeros_like(self.measures).to(self.device)
 
     @property
     def agent(self):
@@ -120,12 +124,13 @@ class PPO:
             returns = advantages + values
         return advantages, returns
 
-    def update(self, rewards, next_obs, next_done, batched_data):
-        advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
+    def update(self, rewards, values, next_obs, next_done, batched_data):
+        advantages, returns = self.calculate_rewards(next_obs, next_done, rewards, values, self.dones,
                                                      rollout_length=self.cfg.rollout_length)
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
-        b_obs, b_logprobs, b_actions, b_values = batched_data
+        b_values = values.reshape(-1)
+        (b_obs, b_logprobs, b_actions) = batched_data
         b_inds = torch.arange(self.cfg.batch_size)
         clipfracs = []
         for epoch in range(self.cfg.update_epochs):
@@ -135,6 +140,53 @@ class PPO:
 
                 _, newlogprob, entropy = self._agent.get_action(b_obs[mb_inds],
                                                                 b_actions[mb_inds])
+                newvalue = self._agent.get_value(b_obs[mb_inds])
+                logratio = newlogprob - b_logprobs[mb_inds]
+                ratio = logratio.exp()
+
+                with torch.no_grad():
+                    # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                    old_approx_kl = (-logratio).mean()
+                    approx_kl = ((ratio - 1) - logratio).mean()
+                    clipfracs += [((ratio - 1.0).abs() > self.cfg.clip_coef).float().mean().item()]
+
+                mb_advantages = b_advantages[mb_inds]
+                if self.cfg.norm_adv:
+                    mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+
+                # policy loss
+                pg_loss1 = -mb_advantages * ratio
+                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - self.cfg.clip_coef, 1 + self.cfg.clip_coef)
+                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+                # value loss
+                newvalue = newvalue.view(-1)
+                if self.cfg.clip_vloss:
+                    v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
+                    v_clipped = b_values[mb_inds] + torch.clamp(
+                        newvalue - b_values[mb_inds],
+                        -self.cfg.clip_coef,
+                        self.cfg.clip_coef,
+                    )
+                    v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                    v_loss = 0.5 * v_loss_max.mean()
+                else:
+                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+
+                entropy_loss = entropy.mean()
+                loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(self._agent.parameters(), self.cfg.max_grad_norm)
+                self.optimizer.step()
+
+            if self.cfg.target_kl is not None:
+                if approx_kl > self.cfg.target_kl:
+                    break
+
+        return b_values, b_returns, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
     def train(self, num_updates, rollout_length):
         global_step = 0
@@ -152,7 +204,7 @@ class PPO:
             for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
                 if self.cfg.normalize_obs:
-                    next_obs = self._agent.obs_normalizer(next_obs.cpu())
+                    next_obs = self._agent.vec_normalize_obs(next_obs)
                 self.obs[step] = next_obs
                 self.dones[step] = next_done.view(-1)
 
@@ -160,13 +212,16 @@ class PPO:
                     action, logprob, _ = self._agent.get_action(next_obs)
                     value = self._agent.get_value(next_obs)
                     self.values[step] = value.flatten()
+                    if self.cfg.algorithm == 'qd-ppo':
+                        measure_values = self._agent.get_measure_values(next_obs)
+                        self.measure_values[step] = measure_values
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
                 next_obs, reward, next_done, infos = self.vec_env.step(action.cpu().numpy())
                 next_obs = next_obs.to(self.device)
                 if self.cfg.normalize_rewards:
-                    reward = self._agent.reward_normalizer(reward, next_done)
+                    reward = self._agent.vec_normalize_rewards(reward, next_done)
                 self.rewards[step] = reward.squeeze()
                 # TODO: validate
                 measures = infos['measures']
@@ -181,72 +236,14 @@ class PPO:
                         #     log.error(f'{total_reward=}')
                         self.episodic_returns.append(infos['total_reward'][i])
 
-            advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
-                                                         rollout_length=rollout_length)
-
             # flatten the batch
             b_obs = self.obs.reshape((-1,) + self.vec_env.single_observation_space.shape)
             b_logprobs = self.logprobs.reshape(-1)
             b_actions = self.actions.reshape((-1,) + self.vec_env.single_action_space.shape)
-            b_advantages = advantages.reshape(-1)
-            b_returns = returns.reshape(-1)
-            b_values = self.values.reshape(-1)
 
-            # optimize the policy and value network
-            b_inds = torch.arange(self.cfg.batch_size)
-            clipfracs = []
-            for epoch in range(self.cfg.update_epochs):
-                for start in range(0, self.cfg.batch_size, self.cfg.minibatch_size):
-                    end = start + self.cfg.minibatch_size
-                    mb_inds = b_inds[start:end]  # grab enough inds for one minibatch
-
-                    _, newlogprob, entropy = self._agent.get_action(b_obs[mb_inds],
-                                                                    b_actions[mb_inds])
-                    newvalue = self._agent.get_value(b_obs[mb_inds])
-                    logratio = newlogprob - b_logprobs[mb_inds]
-                    ratio = logratio.exp()
-
-                    with torch.no_grad():
-                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                        old_approx_kl = (-logratio).mean()
-                        approx_kl = ((ratio - 1) - logratio).mean()
-                        clipfracs += [((ratio - 1.0).abs() > self.cfg.clip_coef).float().mean().item()]
-
-                    mb_advantages = b_advantages[mb_inds]
-                    if self.cfg.norm_adv:
-                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
-
-                    # policy loss
-                    pg_loss1 = -mb_advantages * ratio
-                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - self.cfg.clip_coef, 1 + self.cfg.clip_coef)
-                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-                    # value loss
-                    newvalue = newvalue.view(-1)
-                    if self.cfg.clip_vloss:
-                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                        v_clipped = b_values[mb_inds] + torch.clamp(
-                            newvalue - b_values[mb_inds],
-                            -self.cfg.clip_coef,
-                            self.cfg.clip_coef,
-                        )
-                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                        v_loss = 0.5 * v_loss_max.mean()
-                    else:
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-
-                    entropy_loss = entropy.mean()
-                    loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
-
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(self._agent.parameters(), self.cfg.max_grad_norm)
-                    self.optimizer.step()
-
-                if self.cfg.target_kl is not None:
-                    if approx_kl > self.cfg.target_kl:
-                        break
+            (b_values, b_returns, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
+                self.rewards, self.values, next_obs,
+                next_done, (b_obs, b_logprobs, b_actions))
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)

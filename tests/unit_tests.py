@@ -2,12 +2,12 @@ import numpy as np
 import torch
 import random
 
+from attrdict import AttrDict
 from time import time
 from envs.vec_env import VecEnv
 from utils.utils import log
-from RL.ppo import Agent
-from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared
-from models.actor_critic import ActorCriticSeparate, ActorCriticShared
+from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared
+from models.actor_critic import ActorCriticSeparate, ActorCriticShared, QDActorCriticShared
 
 
 def test_vec_env():
@@ -79,16 +79,16 @@ def validate_state_dicts(model_state_dict_1, model_state_dict_2):
     # Replicate modules have "module" attached to their keys, so strip these off when comparing to local model.
     if next(iter(model_state_dict_1.keys())).startswith("module"):
         model_state_dict_1 = {
-            k[len("module") + 1 :]: v for k, v in model_state_dict_1.items()
+            k[len("module") + 1:]: v for k, v in model_state_dict_1.items()
         }
 
     if next(iter(model_state_dict_2.keys())).startswith("module"):
         model_state_dict_2 = {
-            k[len("module") + 1 :]: v for k, v in model_state_dict_2.items()
+            k[len("module") + 1:]: v for k, v in model_state_dict_2.items()
         }
 
     for ((k_1, v_1), (k_2, v_2)) in zip(
-        model_state_dict_1.items(), model_state_dict_2.items()
+            model_state_dict_1.items(), model_state_dict_2.items()
     ):
         if k_1 != k_2:
             log.info(f"Key mismatch: {k_1} vs {k_2}")
@@ -130,6 +130,27 @@ def test_vectorized_to_list():
                                                "model"
 
 
+def test_qdvec_to_list():
+    obs_shape, action_shape = (8,), np.array(2)
+    cfg = {'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
+           'envs_per_model': 1, 'num_dims': 3}
+    cfg = AttrDict(cfg)
+    models = [QDActorCriticShared(cfg, obs_shape, action_shape, num_dims=3) for _ in range(10)]
+    vec_model = QDVectorizedActorCriticShared(cfg, models, QDActorCriticShared, measure_dims=3, obs_shape=obs_shape,
+                                              action_shape=action_shape)
+
+    vec2models = vec_model.vec_to_models()
+
+    for m_orig, m_new in zip(models, vec2models):
+        orig_statedict, new_statedict = m_orig.state_dict(), m_new.state_dict()
+        assert validate_state_dicts(orig_statedict, new_statedict), "Error: State dicts for original model and model" \
+                                                                    " returned by the vectorized model are not the same"
+        # double check all parameters are the same
+        assert all_params_equal(m_orig.to(torch.device('cuda')),
+                                m_new), "Error: not all parameters are the same for the original and returned " \
+                                        "model"
+
+
 def test_vectorized_actor_critic_shared_weights():
     device = torch.device('cuda')
     obs_shape, action_shape = (8,), np.array(2)
@@ -163,6 +184,7 @@ def test_policy_serialize_deserialize():
 
     assert validate_state_dicts(model1.state_dict(), model2.state_dict())
     assert all_params_equal(model1, model2)
+
 
 # def test_vectorized_stochastic():
 #     random.seed(0)

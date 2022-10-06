@@ -51,7 +51,7 @@ def parse_args():
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     # QD Params
-    parser.add_argument("--algorithm", type=str, choices=['qdrl', 'ppo'])
+    parser.add_argument('--algorithm', type=str, choices=['ppo', 'qd-ppo'])
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
                                                                     " CMA-ES instances exploring the archive")
     parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
@@ -59,6 +59,8 @@ def parse_args():
     args = parser.parse_args()
     args.batch_size = int(args.num_workers * args.envs_per_worker * args.rollout_length)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
+    args.num_envs = int(args.num_workers * args.envs_per_worker)
+    args.envs_per_model = args.num_envs // args.num_emitters
     cfg = AttrDict(vars(args))
     return cfg
 

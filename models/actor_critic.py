@@ -73,7 +73,7 @@ class ActorCriticSeparate(StochasticPolicy):
 
 
 class ActorCriticShared(StochasticPolicy):
-    def __init__(self, cfg, obs_shape, action_shape: np.ndarray, **kwargs):
+    def __init__(self, cfg, obs_shape, action_shape: np.ndarray):
         super().__init__(cfg)
 
         self.core = nn.Sequential(
@@ -117,6 +117,19 @@ class ActorCriticShared(StochasticPolicy):
         '''Gets the raw logits from the actor head. Treats the policy as deterministic'''
         core_out = self.core(obs)
         return self.actor_head(core_out)
+
+
+class QDActorCriticShared(ActorCriticShared):
+    def __init__(self, cfg, obs_shape, action_shape: np.ndarray, num_dims):
+        ActorCriticShared.__init__(self, cfg, obs_shape, action_shape)
+        self.num_dims = num_dims
+        # create new critic heads, one for each measure
+        self.measure_critic_heads = nn.Sequential(layer_init(nn.Linear(64, num_dims), std=1.0))
+
+    def get_measure_values(self, obs):
+        core_out = self.core(obs)
+        value = self.measure_critic_heads(core_out)
+        return value
 
 
 class LinearPolicy(nn.Module):

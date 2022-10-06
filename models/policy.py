@@ -16,8 +16,7 @@ class StochasticPolicy(ABC, nn.Module):
         if cfg.normalize_obs:
             self.obs_normalizer = NormalizeObservation((28,))  # TODO: fix this
         if cfg.normalize_rewards:
-            num_envs = cfg.num_workers * cfg.envs_per_worker
-            self.reward_normalizer = NormalizeReward(num_envs)
+            self.reward_normalizer = NormalizeReward(cfg.envs_per_model)
 
     @abstractmethod
     def forward(self, obs):

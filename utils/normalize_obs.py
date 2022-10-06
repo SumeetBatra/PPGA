@@ -85,7 +85,7 @@ class NormalizeReward(nn.Module):
         self.epsilon = epsilon
 
     def forward(self, rews, dones):
-        self.returns = self.returns * self.gamma + rews
+        self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
         rews = self.normalize(rews)
         self.returns[dones.long()] = 0.0
         return rews
