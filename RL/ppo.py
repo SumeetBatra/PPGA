@@ -103,10 +103,13 @@ class PPO:
         self._agent = agent
         self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
-    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length):
+    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, measure_reward=False):
         # bootstrap value if not done
         with torch.no_grad():
-            next_value = self._agent.get_value(next_obs).reshape(1, -1).to(self.device)
+            if measure_reward:
+                next_value = self._agent.get_measure_values(next_obs).reshape(1, self.cfg.num_envs, -1).to(self.device)
+            else:
+                next_value = self._agent.get_value(next_obs).reshape(1, -1).to(self.device)
             # assume we use gae
             advantages = torch.zeros_like(rewards).to(self.device)
             lastgaelam = 0
@@ -117,20 +120,19 @@ class PPO:
                 else:
                     is_next_nonterminal = 1.0 - dones[t + 1]
                     next_values = values[t + 1]
-                is_next_nonterminal = is_next_nonterminal.to(self.device).reshape(1, -1)
+                if measure_reward:
+                    is_next_nonterminal = is_next_nonterminal.to(self.device)
+                else:
+                    is_next_nonterminal = is_next_nonterminal.to(self.device).reshape(1, -1)
                 delta = rewards[t] + self.cfg.gamma * next_values * is_next_nonterminal - values[t]
                 advantages[t] = lastgaelam = \
                     delta + self.cfg.gamma * self.cfg.gae_lambda * is_next_nonterminal * lastgaelam
             returns = advantages + values
         return advantages, returns
 
-    def update(self, rewards, values, next_obs, next_done, batched_data):
-        advantages, returns = self.calculate_rewards(next_obs, next_done, rewards, values, self.dones,
-                                                     rollout_length=self.cfg.rollout_length)
-        b_advantages = advantages.reshape(-1)
-        b_returns = returns.reshape(-1)
+    def update(self, values, batched_data):
         b_values = values.reshape(-1)
-        (b_obs, b_logprobs, b_actions) = batched_data
+        (b_obs, b_logprobs, b_actions, b_advantages, b_returns) = batched_data
         b_inds = torch.arange(self.cfg.batch_size)
         clipfracs = []
         for epoch in range(self.cfg.update_epochs):
@@ -223,10 +225,10 @@ class PPO:
                 if self.cfg.normalize_rewards:
                     reward = self._agent.vec_normalize_rewards(reward, next_done)
                 self.rewards[step] = reward.squeeze()
-                # TODO: validate
-                measures = infos['measures']
 
-                # TODO: logging
+                measures = infos['measures']
+                self.measures[step] = measures
+
                 # log.debug(f'{global_step=}')
                 for i, done in enumerate(next_done.flatten()):
                     if done:
@@ -236,14 +238,34 @@ class PPO:
                         #     log.error(f'{total_reward=}')
                         self.episodic_returns.append(infos['total_reward'][i])
 
+            advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
+                                                         rollout_length=self.cfg.rollout_length)
             # flatten the batch
             b_obs = self.obs.reshape((-1,) + self.vec_env.single_observation_space.shape)
             b_logprobs = self.logprobs.reshape(-1)
             b_actions = self.actions.reshape((-1,) + self.vec_env.single_action_space.shape)
+            b_advantages = advantages.reshape(-1)
+            b_returns = returns.reshape(-1)
 
             (b_values, b_returns, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
-                self.rewards, self.values, next_obs,
-                next_done, (b_obs, b_logprobs, b_actions))
+                self.values, (b_obs, b_logprobs, b_actions, b_advantages, b_returns))
+
+            #########################
+            ### TESTING #############
+            if self.cfg.algorithm == 'qd-ppo':
+                next_done_repeated = torch.repeat_interleave(next_done.unsqueeze(1), repeats=self.cfg.num_dims, dim=-1)
+                dones_repeated = torch.repeat_interleave(self.dones.unsqueeze(2), repeats=self.cfg.num_dims, dim=-1)
+                m_advantages, m_returns = self.calculate_rewards(next_obs, next_done_repeated, self.measures,
+                                                                 self.measure_values, dones_repeated,
+                                                                 rollout_length=self.cfg.rollout_length,
+                                                                 measure_reward=True)
+                bm_advantages = m_advantages.reshape(-1, self.cfg.num_dims)
+                bm_returns = m_returns.reshape(-1, self.cfg.num_dims)
+                for i in range(self.cfg.num_dims):
+                    _ = self.update(self.measure_values[i], (b_obs, b_logprobs, b_actions, bm_advantages[i], bm_returns[i]))
+
+            #########################
+            #########################
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
