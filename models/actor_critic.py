@@ -39,9 +39,9 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy()
 
 
-class ActorCriticSeparate(nn.Module):
-    def __init__(self, obs_shape, action_shape: np.ndarray):
-        super().__init__()
+class ActorCriticSeparate(StochasticPolicy):
+    def __init__(self, obs_shape, action_shape: np.ndarray, **kwargs):
+        super().__init__(normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
             nn.Tanh(),
@@ -73,8 +73,8 @@ class ActorCriticSeparate(nn.Module):
 
 
 class ActorCriticShared(StochasticPolicy):
-    def __init__(self, obs_shape, action_shape: np.ndarray):
-        super().__init__()
+    def __init__(self, cfg, obs_shape, action_shape: np.ndarray, **kwargs):
+        super().__init__(cfg)
 
         self.core = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),

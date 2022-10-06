@@ -48,6 +48,8 @@ def parse_args():
                         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target_kl", type=float, default=None,
                         help="the target KL divergence threshold")
+    parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
+    parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     # QD Params
     parser.add_argument("--algorithm", type=str, choices=['qdrl', 'ppo'])
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"

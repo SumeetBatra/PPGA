@@ -2,6 +2,9 @@ import gym.vector
 import numpy as np
 import random
 import time
+
+import torch
+
 import utils.utils
 import wandb
 
@@ -25,8 +28,10 @@ def make_vec_env(cfg):
                      num_workers=cfg.num_workers,
                      envs_per_worker=cfg.envs_per_worker)
     # these wrappers are applied at the vecenv level instead of the single env level
-    vec_env = NormalizeObservation(vec_env)
-    vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
+    # if cfg.normalize_obs:
+    #     vec_env = NormalizeObservation(vec_env)
+    # if cfg.normalize_rewards:
+    #     vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
     return vec_env
 
 
@@ -55,8 +60,9 @@ class PPO:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         obs_shape = self.vec_env.single_observation_space.shape
         action_shape = self.vec_env.single_action_space.shape
-        agent = [ActorCriticShared(obs_shape, action_shape).to(self.device)]
-        self._agent = VectorizedActorCriticShared(agent, ActorCriticShared, obs_shape=obs_shape, action_shape=action_shape)
+        # agent = [ActorCriticShared(obs_shape, action_shape).to(self.device)]
+        # self._agent = VectorizedActorCriticShared(agent, ActorCriticShared, obs_shape=obs_shape, action_shape=action_shape)
+        self._agent = ActorCriticShared(cfg, obs_shape, action_shape).to(self.device)
         self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
@@ -72,6 +78,17 @@ class PPO:
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = cfg.torch_deterministic
+
+        # initialize tensors for training
+        self.obs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(
+            self.device)
+        self.actions = torch.zeros((cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(
+            self.device)
+        self.logprobs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
+        self.rewards = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
+        self.dones = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
+        self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
+        self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
 
     @property
     def agent(self):
@@ -103,20 +120,25 @@ class PPO:
             returns = advantages + values
         return advantages, returns
 
-    def train(self, num_updates, rollout_length):
-        obs = torch.zeros((rollout_length, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(
-            self.device)
-        actions = torch.zeros((rollout_length, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(
-            self.device)
-        logprobs = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
-        rewards = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
-        dones = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
-        values = torch.zeros((rollout_length, self.vec_env.num_envs)).to(self.device)
-        measures = torch.zeros((rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
+    def update(self, rewards, next_obs, next_done, batched_data):
+        advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
+                                                     rollout_length=self.cfg.rollout_length)
+        b_advantages = advantages.reshape(-1)
+        b_returns = returns.reshape(-1)
+        b_obs, b_logprobs, b_actions, b_values = batched_data
+        b_inds = torch.arange(self.cfg.batch_size)
+        clipfracs = []
+        for epoch in range(self.cfg.update_epochs):
+            for start in range(0, self.cfg.batch_size, self.cfg.minibatch_size):
+                end = start + self.cfg.minibatch_size
+                mb_inds = b_inds[start:end]
 
+                _, newlogprob, entropy = self._agent.get_action(b_obs[mb_inds],
+                                                                b_actions[mb_inds])
+
+    def train(self, num_updates, rollout_length):
         global_step = 0
         next_obs = self.vec_env.reset()
-        # next_obs = torch.from_numpy(next_obs).to(self.device)
         next_obs = next_obs.to(self.device)
         next_done = torch.zeros(self.vec_env.num_envs).to(self.device)
 
@@ -129,19 +151,23 @@ class PPO:
 
             for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
-                obs[step] = next_obs
-                dones[step] = next_done.view(-1)
+                if self.cfg.normalize_obs:
+                    next_obs = self._agent.obs_normalizer(next_obs.cpu())
+                self.obs[step] = next_obs
+                self.dones[step] = next_done.view(-1)
 
                 with torch.no_grad():
                     action, logprob, _ = self._agent.get_action(next_obs)
                     value = self._agent.get_value(next_obs)
-                    values[step] = value.flatten()
-                actions[step] = action
-                logprobs[step] = logprob
+                    self.values[step] = value.flatten()
+                self.actions[step] = action
+                self.logprobs[step] = logprob
 
                 next_obs, reward, next_done, infos = self.vec_env.step(action.cpu().numpy())
                 next_obs = next_obs.to(self.device)
-                rewards[step] = reward.squeeze()
+                if self.cfg.normalize_rewards:
+                    reward = self._agent.reward_normalizer(reward, next_done)
+                self.rewards[step] = reward.squeeze()
                 # TODO: validate
                 measures = infos['measures']
 
@@ -155,22 +181,21 @@ class PPO:
                         #     log.error(f'{total_reward=}')
                         self.episodic_returns.append(infos['total_reward'][i])
 
-            advantages, returns = self.calculate_rewards(next_obs, next_done, rewards, values, dones,
+            advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
                                                          rollout_length=rollout_length)
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + self.vec_env.single_observation_space.shape)
-            b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + self.vec_env.single_action_space.shape)
+            b_obs = self.obs.reshape((-1,) + self.vec_env.single_observation_space.shape)
+            b_logprobs = self.logprobs.reshape(-1)
+            b_actions = self.actions.reshape((-1,) + self.vec_env.single_action_space.shape)
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
-            b_values = values.reshape(-1)
+            b_values = self.values.reshape(-1)
 
             # optimize the policy and value network
             b_inds = torch.arange(self.cfg.batch_size)
             clipfracs = []
             for epoch in range(self.cfg.update_epochs):
-                # np.random.shuffle(b_inds)
                 for start in range(0, self.cfg.batch_size, self.cfg.minibatch_size):
                     end = start + self.cfg.minibatch_size
                     mb_inds = b_inds[start:end]  # grab enough inds for one minibatch

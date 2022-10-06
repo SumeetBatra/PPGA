@@ -5,12 +5,19 @@ import gym
 
 from abc import ABC, abstractmethod
 from torch.distributions import MultivariateNormal, Categorical
+from utils.normalize_obs import NormalizeReward, NormalizeObservation
 
 
 class StochasticPolicy(ABC, nn.Module):
-    def __init__(self):
+    def __init__(self, cfg):
         super().__init__()
         self.layers: nn.Sequential
+
+        if cfg.normalize_obs:
+            self.obs_normalizer = NormalizeObservation((28,))  # TODO: fix this
+        if cfg.normalize_rewards:
+            num_envs = cfg.num_workers * cfg.envs_per_worker
+            self.reward_normalizer = NormalizeReward(num_envs)
 
     @abstractmethod
     def forward(self, obs):

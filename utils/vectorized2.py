@@ -30,7 +30,7 @@ class VectorizedLinearBlock(nn.Module):
 
 class VectorizedPolicy(StochasticPolicy):
     def __init__(self, models, model_fn, **kwargs):
-        StochasticPolicy.__init__(self)
+        StochasticPolicy.__init__(self, normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.device = torch.device('cuda')  # TODO: fix this
@@ -87,7 +87,7 @@ class VectorizedPolicy(StochasticPolicy):
 
 class VectorizedActorCriticShared(StochasticPolicy):
     def __init__(self, models, model_fn, **kwargs):
-        StochasticPolicy.__init__(self)
+        StochasticPolicy.__init__(self, normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.device = torch.device('cuda')  # TODO: fix this
