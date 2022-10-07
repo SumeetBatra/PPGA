@@ -105,7 +105,8 @@ class VectorizedActorCriticShared(StochasticPolicy):
                                                        nn.Sequential(*self.actor_head_blocks), \
                                                        nn.Sequential(*self.critic_head_blocks)
         action_logprobs = [model.actor_logstd for model in models]
-        self._actor_logstd = nn.Parameter(torch.cat(action_logprobs)).to(self.device)
+        action_logprobs = torch.cat(action_logprobs).to(self.device)
+        self._actor_logstd = nn.Parameter(action_logprobs)
         self.kwargs = kwargs
 
         if cfg.normalize_obs:
@@ -211,7 +212,7 @@ class VectorizedActorCriticShared(StochasticPolicy):
 
 class QDVectorizedActorCriticShared(VectorizedActorCriticShared):
     def __init__(self, cfg, models, model_fn, measure_dims, **kwargs):
-        VectorizedActorCriticShared.__init__(self, cfg, models, model_fn, **kwargs)
+        super().__init__(cfg, models, model_fn, **kwargs)
         self.measure_dims = measure_dims
         self.measure_critic_head_blocks = self._vectorize_layers('measure_critic_heads', models)
         self.measure_critic_heads = nn.Sequential(*self.measure_critic_head_blocks)

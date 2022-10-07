@@ -2,6 +2,7 @@ import gym.vector
 import numpy as np
 import random
 import time
+import copy
 
 import torch
 import torch.nn as nn
@@ -62,10 +63,25 @@ class PPO:
         obs_shape = self.vec_env.single_observation_space.shape
         action_shape = self.vec_env.single_action_space.shape
         agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
-        self._agent = QDVectorizedActorCriticShared(cfg, [agent], QDActorCriticShared, cfg.num_dims).to(self.device)
+        self._agent = QDVectorizedActorCriticShared(cfg, [agent], QDActorCriticShared, cfg.num_dims,
+                                                    obs_shape=obs_shape, action_shape=action_shape).to(self.device)
         # self._agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
-        self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        # self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
+
+        # single policy eval env
+        single_eval_cfg = copy.deepcopy(cfg)
+        single_eval_cfg.num_workers = 1
+        single_eval_cfg.envs_per_worker = 1
+        single_eval_cfg.envs_per_model = 1
+        self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=1, envs_per_worker=1)
+
+        # multi-policy eval
+        multi_eval_cfg = copy.deepcopy(cfg)
+        multi_eval_cfg.num_workers = 6
+        multi_eval_cfg.envs_per_worker = 1
+        multi_eval_cfg.envs_per_model = 1
+        self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=6, envs_per_worker=1)
 
         # metrics for logging
         self.metric_last_n_window = 10
@@ -101,7 +117,6 @@ class PPO:
     @agent.setter
     def agent(self, agent):
         self._agent = agent
-        self.optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, measure_reward=False):
         # bootstrap value if not done
@@ -131,6 +146,7 @@ class PPO:
         return advantages, returns
 
     def update(self, values, batched_data):
+        optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
         b_values = values.reshape(-1)
         (b_obs, b_logprobs, b_actions, b_advantages, b_returns) = batched_data
         b_inds = torch.arange(self.cfg.batch_size)
@@ -179,10 +195,10 @@ class PPO:
                 entropy_loss = entropy.mean()
                 loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
 
-                self.optimizer.zero_grad()
+                optimizer.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self._agent.parameters(), self.cfg.max_grad_norm)
-                self.optimizer.step()
+                optimizer.step()
 
             if self.cfg.target_kl is not None:
                 if approx_kl > self.cfg.target_kl:
@@ -191,17 +207,24 @@ class PPO:
         return b_values, b_returns, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
     def train(self, num_updates, rollout_length):
+        # TODO: HACK
+        num_updates = 1
+
         global_step = 0
         next_obs = self.vec_env.reset()
         next_obs = next_obs.to(self.device)
         next_done = torch.zeros(self.vec_env.num_envs).to(self.device)
+
+        original_params = copy.deepcopy(self._agent.serialize())
+        # initial optimizer
+        optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
         for update in range(1, num_updates + 1):
             # learning rate annealing
             if self.cfg.anneal_lr:
                 frac = 1.0 - (update - 1.0) / num_updates
                 lrnow = frac * self.cfg.learning_rate
-                self.optimizer.param_groups[0]["lr"] = lrnow
+                optimizer.param_groups[0]["lr"] = lrnow
 
             for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
@@ -249,10 +272,21 @@ class PPO:
 
             (b_values, b_returns, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
                 self.values, (b_obs, b_logprobs, b_actions, b_advantages, b_returns))
+            if self.cfg.algorithm == 'qd-ppo':
+                obj_grad = self._agent.serialize() - original_params
 
             #########################
             ### TESTING #############
             if self.cfg.algorithm == 'qd-ppo':
+                # reset agent back to original solution point
+                self._agent.deserialize(original_params).to(self.device)
+                # reset optimizer
+                # TODO: find a better way to do this
+                # one idea is to preserve one optimizer for each singleton agent,
+                # since Adam keeps tracking of higher order per-param grad info
+                optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+
+                m_grads = []
                 next_done_repeated = torch.repeat_interleave(next_done.unsqueeze(1), repeats=self.cfg.num_dims, dim=-1)
                 dones_repeated = torch.repeat_interleave(self.dones.unsqueeze(2), repeats=self.cfg.num_dims, dim=-1)
                 m_advantages, m_returns = self.calculate_rewards(next_obs, next_done_repeated, self.measures,
@@ -262,7 +296,10 @@ class PPO:
                 bm_advantages = m_advantages.reshape(-1, self.cfg.num_dims)
                 bm_returns = m_returns.reshape(-1, self.cfg.num_dims)
                 for i in range(self.cfg.num_dims):
-                    _ = self.update(self.measure_values[i], (b_obs, b_logprobs, b_actions, bm_advantages[i], bm_returns[i]))
+                    _ = self.update(self.measure_values[:, :, i],
+                                    (b_obs, b_logprobs, b_actions, bm_advantages[:, i], bm_returns[:, i]))
+                    m_grad = self._agent.serialize() - original_params
+                    m_grads.append(m_grad)
 
             #########################
             #########################
@@ -273,7 +310,7 @@ class PPO:
 
             if self.cfg.use_wandb:
                 wandb.log({
-                    "charts/learning_rate": self.optimizer.param_groups[0]['lr'],
+                    "charts/learning_rate": optimizer.param_groups[0]['lr'],
                     "losses/value_loss": v_loss.item(),
                     "losses/policy_loss": pg_loss.item(),
                     "losses/entropy": entropy_loss.item(),
@@ -284,35 +321,37 @@ class PPO:
                     f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
                     "Env step": global_step
                 })
-        log.debug("Saving checkpoint...")
-        save_checkpoint('checkpoints', 'checkpoint0', self._agent, self.optimizer)
-        self.vec_env.stop.emit()
-        log.debug("Done!")
+        if self.cfg.algorithm == 'ppo':
+            log.debug("Saving checkpoint...")
+            save_checkpoint('checkpoints', 'checkpoint0', self._agent.vec_to_models()[0], optimizer)
+            self.vec_env.stop.emit()
+            log.debug("Done!")
+        else:
+            m_grads = np.concatenate(m_grads, axis=0).reshape(self.cfg.num_dims, -1)
+            f, m = self.evaluate(self._agent, self.single_eval_env)
+            return f.reshape(self._agent.num_models, ), \
+                   obj_grad.reshape(self._agent.num_models, -1), \
+                   m.reshape(self._agent.num_models, -1), \
+                   m_grads.reshape(self._agent.num_models, self.cfg.num_dims, -1)
 
-    def evaluate(self, vec_agent):
+    def evaluate(self, vec_agent, vec_env):
         '''
         Evaluate all agents for one episode using deterministic actions and collect measures
         :param vec_agent: Vectorized agents for vectorized inference
         :returns: Sum rewards and measures for all agents
         '''
 
-        # TODO: untested and definitely doesn't work. Need to implement all interfaces
-
-        # kill the previous processes to save memory
-        self.vec_env.close()
-        # resize vec env s.t. there is one env per agent
-        self.vec_env = make_vec_env_for_eval(self.cfg, vec_agent.num_models, envs_per_worker=1)
-
         total_reward = np.zeros((vec_agent.num_models,))
-        measures = np.zeros((self.cfg.num_dims, vec_agent.num_models))
+        measures = np.zeros((vec_agent.num_models, self.cfg.num_dims))
 
-        obs = self.vec_env.reset()
+        obs = vec_env.reset()
         obs = obs.to(self.device)
-        dones = torch.BoolTensor([False for _ in range(self.vec_env.num_envs)])
+        dones = torch.BoolTensor([False for _ in range(vec_env.num_envs)])
 
         while not all(dones):
             acts = vec_agent(obs)
-            obs, rew, next_dones, infos = self.vec_env.step(acts.detach().cpu().numpy())
+            acts = acts.unsqueeze(1)
+            obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy())
             obs = obs.to(self.device)
             total_reward += rew.detach().cpu().numpy()
             dones = torch.logical_or(dones, next_dones)

@@ -6,9 +6,10 @@ import torch
 from attrdict import AttrDict
 from RL.ppo import *
 from utils.utils import log
-from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared
+from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared
 from envs.env import make_env
 from QDgym.QDgym_envs import QDAntBulletEnv
+from models.actor_critic import QDActorCriticShared
 
 
 def enjoy():
@@ -20,12 +21,15 @@ def enjoy():
     obs_shape, action_shape = env.observation_space.shape, env.action_space.shape
     cp_path = "checkpoints/checkpoint0"
     model_state_dict = torch.load(cp_path)['model_state_dict']
-    cfg = {'num_workers': 1, 'envs_per_worker': 1, 'normalize_obs': True, 'normalize_rewards': True}
+    cfg = {'num_workers': 1, 'envs_per_worker': 1, 'normalize_obs': True, 'normalize_rewards': True, 'num_dims': 4, 'envs_per_model': 1}
     cfg = AttrDict(cfg)
-    agent = ActorCriticShared(cfg, obs_shape, action_shape).to(device)
-    # agent = VectorizedActorCriticShared([agent], ActorCriticShared)
+    agent = QDActorCriticShared(cfg, obs_shape, action_shape, 4).to(device)
+    # agent = QDVectorizedActorCriticShared(cfg, [agent], QDActorCriticShared, measure_dims=4)
+    model_state_dict['_actor_logstd'] = model_state_dict['_actor_logstd'].reshape(1, -1)
     agent.load_state_dict(model_state_dict)
     obs_mean, obs_var = agent.obs_normalizer.obs_rms.mean, agent.obs_normalizer.obs_rms.var
+    obs_mean = obs_mean.to(device)
+    obs_var = obs_var.to(device)
 
     obs = env.reset()
     obs = torch.from_numpy(obs).to(device).reshape(1, -1)
