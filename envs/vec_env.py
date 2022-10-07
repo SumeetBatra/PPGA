@@ -80,9 +80,9 @@ class VecEnv(EventLoopObject, gym.Env):
             ...
         res = self.res_buffer.detach().clone().reshape(self.num_envs, -1)
         obs, rew, done = res[:, :self.obs_dim], res[:, self.obs_dim], res[:, self.obs_dim + 1]
-        infos = {}
-        for key, value in self.infos.items():
-            infos[key] = value.reshape(self.num_envs, -1).detach().clone()
+        infos = copy.deepcopy(self.infos)
+        for key, val in infos.items():
+            infos[key] = val.reshape(self.num_envs, -1)
         # reset the done buffers
         self.done_buffer[:] = 0
         return obs, rew, done, infos

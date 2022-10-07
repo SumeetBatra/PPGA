@@ -41,7 +41,7 @@ def enjoy():
         act, _, _ = agent.get_action(obs)
         # act = agent(obs)
         act = act.squeeze()
-        obs, rew, done, _ = env.step(act.detach().cpu().numpy())
+        obs, rew, done, info = env.step(act.detach().cpu().numpy())
         log.debug(f'{rew=}')
         total_reward += rew
         obs = torch.from_numpy(obs).to(device).reshape(1, -1)

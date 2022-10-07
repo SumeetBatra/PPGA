@@ -11,14 +11,14 @@ class VectorizedLinearBlock(nn.Module):
     def __init__(self, weights: torch.Tensor, biases=None, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
-        self.device = torch.device('cuda')  # TODO: fix this
+        self.device = torch.device('cpu')  # TODO: fix this
         self.weight = nn.Parameter(weights).to(self.device)  # one slice of all the mlps we want to process as a batch
         self.bias = nn.Parameter(biases).to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         obs_per_weight = x.shape[0] // self.weight.shape[0]
         x = torch.reshape(x, (-1, obs_per_weight, x.shape[1]))
-        w_t = torch.transpose(self.weight, 1, 2).to(torch.device('cuda'))  # TODO: fix this
+        w_t = torch.transpose(self.weight, 1, 2).to(torch.device('cpu'))  # TODO: fix this
         y = torch.bmm(x, w_t)
         if self.bias is not None:
             y = torch.transpose(y, 0, 1)
@@ -93,7 +93,7 @@ class VectorizedActorCriticShared(StochasticPolicy):
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.cfg = cfg
-        self.device = torch.device('cuda')  # TODO: fix this
+        self.device = torch.device('cpu')  # TODO: fix this
         self.num_models = len(models)
         self.model_fn = model_fn
         self.core_blocks, self.actor_head_blocks, self.critic_head_blocks = self._vectorize_layers('core', models), \

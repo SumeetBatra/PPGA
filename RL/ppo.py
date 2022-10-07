@@ -18,6 +18,7 @@ from utils.utils import log, save_checkpoint
 from utils.vectorized2 import VectorizedActorCriticShared, QDVectorizedActorCriticShared
 from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
 from models.actor_critic import QDActorCriticShared, ActorCriticShared
+from QDgym.QDgym_envs import QDAntBulletEnv
 
 
 # based off of the clean-rl implementation
@@ -59,7 +60,8 @@ def gradient_linear(agent):
 class PPO:
     def __init__(self, seed, cfg):
         self.vec_env = make_vec_env(cfg)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device('cpu')
         obs_shape = self.vec_env.single_observation_space.shape
         action_shape = self.vec_env.single_action_space.shape
         agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
@@ -208,7 +210,7 @@ class PPO:
 
     def train(self, num_updates, rollout_length):
         # TODO: HACK
-        num_updates = 1
+        # num_updates = 1
 
         global_step = 0
         next_obs = self.vec_env.reset()
@@ -277,32 +279,29 @@ class PPO:
 
             #########################
             ### TESTING #############
-            if self.cfg.algorithm == 'qd-ppo':
-                # reset agent back to original solution point
-                self._agent.deserialize(original_params).to(self.device)
-                # reset optimizer
-                # TODO: find a better way to do this
-                # one idea is to preserve one optimizer for each singleton agent,
-                # since Adam keeps tracking of higher order per-param grad info
-                optimizer = torch.optim.Adam(self._agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
-
-                m_grads = []
-                next_done_repeated = torch.repeat_interleave(next_done.unsqueeze(1), repeats=self.cfg.num_dims, dim=-1)
-                dones_repeated = torch.repeat_interleave(self.dones.unsqueeze(2), repeats=self.cfg.num_dims, dim=-1)
-                m_advantages, m_returns = self.calculate_rewards(next_obs, next_done_repeated, self.measures,
-                                                                 self.measure_values, dones_repeated,
-                                                                 rollout_length=self.cfg.rollout_length,
-                                                                 measure_reward=True)
-                bm_advantages = m_advantages.reshape(-1, self.cfg.num_dims)
-                bm_returns = m_returns.reshape(-1, self.cfg.num_dims)
-                for i in range(self.cfg.num_dims):
-                    _ = self.update(self.measure_values[:, :, i],
-                                    (b_obs, b_logprobs, b_actions, bm_advantages[:, i], bm_returns[:, i]))
-                    m_grad = self._agent.serialize() - original_params
-                    m_grads.append(m_grad)
+            # if self.cfg.algorithm == 'qd-ppo':
+            #
+            #     m_grads = []
+            #     next_done_repeated = torch.repeat_interleave(next_done.unsqueeze(1), repeats=self.cfg.num_dims, dim=-1)
+            #     dones_repeated = torch.repeat_interleave(self.dones.unsqueeze(2), repeats=self.cfg.num_dims, dim=-1)
+            #     m_advantages, m_returns = self.calculate_rewards(next_obs, next_done_repeated, self.measures,
+            #                                                      self.measure_values, dones_repeated,
+            #                                                      rollout_length=self.cfg.rollout_length,
+            #                                                      measure_reward=True)
+            #     bm_advantages = m_advantages.reshape(-1, self.cfg.num_dims)
+            #     bm_returns = m_returns.reshape(-1, self.cfg.num_dims)
+            #     for i in range(self.cfg.num_dims):
+            #         # reset agent back to original solution point
+            #         self._agent.deserialize(original_params).to(self.device)
+            #         _ = self.update(self.measure_values[:, :, i],
+            #                         (b_obs, b_logprobs, b_actions, bm_advantages[:, i], bm_returns[:, i]))
+            #         m_grad = self._agent.serialize() - original_params
+            #         m_grads.append(m_grad)
 
             #########################
             #########################
+            # fake the gradients for testing
+            m_grads = np.zeros((self._agent.num_models, self.cfg.num_dims, len(original_params)))
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -336,20 +335,19 @@ class PPO:
 
     def evaluate(self, vec_agent, vec_env):
         '''
-        Evaluate all agents for one episode using deterministic actions and collect measures
+        Evaluate all agents for one episode
         :param vec_agent: Vectorized agents for vectorized inference
         :returns: Sum rewards and measures for all agents
         '''
 
         total_reward = np.zeros((vec_agent.num_models,))
-        measures = np.zeros((vec_agent.num_models, self.cfg.num_dims))
 
         obs = vec_env.reset()
         obs = obs.to(self.device)
         dones = torch.BoolTensor([False for _ in range(vec_env.num_envs)])
 
         while not all(dones):
-            acts = vec_agent(obs)
+            acts, _, _ = vec_agent.get_action(obs)
             acts = acts.unsqueeze(1)
             obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy())
             obs = obs.to(self.device)
@@ -360,6 +358,8 @@ class PPO:
         measures = infos['bc'].detach().cpu().numpy()
 
         log.debug('Finished Evaluation Step')
+        log.info(f'BC on eval: {measures}')
+        log.info(f'Rewards on eval: {total_reward}')
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)
 

@@ -22,12 +22,15 @@ class Worker(EventLoopObject):
             obs, rew, done, info = env.step(action[self.pid, idx])
             if done:
                 self.infos['total_reward'][self.pid, idx] = env.total_reward
+                # the actual behavior descriptor that's dependent on the entire trajectory
+                bc = torch.from_numpy(info['bc'])
+                self.infos['bc'][self.pid, idx, :] = bc
                 obs = env.reset()
             obs_tensor, rew_tensor, done_tensor = torch.from_numpy(obs), torch.Tensor([rew]), torch.Tensor([done])
-            measures = torch.from_numpy(info['bc'])
+            measures = torch.from_numpy(info['measures'])
             res = torch.cat((obs_tensor, rew_tensor, done_tensor))
             self.res_buffer[self.pid, idx, :] = res
-            self.infos['bc'][self.pid, idx, :] = measures
+            self.infos['measures'][self.pid, idx, :] = measures
         self.done_buffer[self.pid] = True
 
     def reset(self):
