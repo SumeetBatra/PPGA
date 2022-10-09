@@ -60,8 +60,7 @@ def gradient_linear(agent):
 class PPO:
     def __init__(self, seed, cfg):
         self.vec_env = make_vec_env(cfg)
-        # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.device = torch.device('cpu')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         obs_shape = self.vec_env.single_observation_space.shape
         action_shape = self.vec_env.single_action_space.shape
         agent = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
@@ -73,17 +72,17 @@ class PPO:
 
         # single policy eval env
         single_eval_cfg = copy.deepcopy(cfg)
-        single_eval_cfg.num_workers = 1
+        single_eval_cfg.num_workers = 4
         single_eval_cfg.envs_per_worker = 1
-        single_eval_cfg.envs_per_model = 1
-        self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=1, envs_per_worker=1)
+        single_eval_cfg.envs_per_model = 4
+        self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers, envs_per_worker=single_eval_cfg.envs_per_worker)
 
         # multi-policy eval
         multi_eval_cfg = copy.deepcopy(cfg)
-        multi_eval_cfg.num_workers = 6
-        multi_eval_cfg.envs_per_worker = 1
-        multi_eval_cfg.envs_per_model = 1
-        self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=6, envs_per_worker=1)
+        multi_eval_cfg.num_workers = cfg.mega_lambda
+        multi_eval_cfg.envs_per_worker = 4
+        multi_eval_cfg.envs_per_model = 4
+        self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers, envs_per_worker=multi_eval_cfg.envs_per_worker)
 
         # metrics for logging
         self.metric_last_n_window = 10
@@ -209,9 +208,6 @@ class PPO:
         return b_values, b_returns, pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
     def train(self, num_updates, rollout_length):
-        # TODO: HACK
-        # num_updates = 1
-
         global_step = 0
         next_obs = self.vec_env.reset()
         next_obs = next_obs.to(self.device)
@@ -320,6 +316,7 @@ class PPO:
                     f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
                     "Env step": global_step
                 })
+            log.debug(f"Finished PPO iteration {update}")
         if self.cfg.algorithm == 'ppo':
             log.debug("Saving checkpoint...")
             save_checkpoint('checkpoints', 'checkpoint0', self._agent.vec_to_models()[0], optimizer)
@@ -340,26 +337,39 @@ class PPO:
         :returns: Sum rewards and measures for all agents
         '''
 
-        total_reward = np.zeros((vec_agent.num_models,))
+        total_reward = np.zeros((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
 
         obs = vec_env.reset()
         obs = obs.to(self.device)
         dones = torch.BoolTensor([False for _ in range(vec_env.num_envs)])
 
+        if self.cfg.normalize_obs:
+            obs_mean = self._agent.obs_normalizer.obs_rms.mean.to(self.device)
+            obs_var = self._agent.obs_normalizer.obs_rms.var.to(self.device)
+
         while not all(dones):
-            acts, _, _ = vec_agent.get_action(obs)
-            acts = acts.unsqueeze(1)
-            obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy())
-            obs = obs.to(self.device)
-            total_reward += rew.detach().cpu().numpy()
-            dones = torch.logical_or(dones, next_dones)
+            with torch.no_grad():
+                if self.cfg.normalize_obs:
+                    obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
+                acts, _, _ = vec_agent.get_action(obs)
+                acts = acts.unsqueeze(1)
+                obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy(), autoreset=True)  # TODO: fix this. In general, we should not be autoresetting here
+                obs = obs.to(self.device)
+                total_reward += rew.detach().cpu().numpy().reshape(vec_agent.num_models, -1)
+                dones = torch.logical_or(dones, next_dones)
 
         # get the final measures stored in the infos from the final timestep
         measures = infos['bc'].detach().cpu().numpy()
+        measures = np.zeros_like(measures).reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(axis=1)
+
+        total_reward = total_reward.mean(axis=1)
+
+        traj_lengths = infos['traj_length']
 
         log.debug('Finished Evaluation Step')
         log.info(f'BC on eval: {measures}')
         log.info(f'Rewards on eval: {total_reward}')
+        # log.info(f'{traj_lengths=}')
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)
 

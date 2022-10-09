@@ -26,7 +26,7 @@ def enjoy():
     agent = QDActorCriticShared(cfg, obs_shape, action_shape, 4).to(device)
     # agent = QDVectorizedActorCriticShared(cfg, [agent], QDActorCriticShared, measure_dims=4)
     model_state_dict['_actor_logstd'] = model_state_dict['_actor_logstd'].reshape(1, -1)
-    agent.load_state_dict(model_state_dict)
+    # agent.load_state_dict(model_state_dict)
     obs_mean, obs_var = agent.obs_normalizer.obs_rms.mean, agent.obs_normalizer.obs_rms.var
     obs_mean = obs_mean.to(device)
     obs_var = obs_var.to(device)

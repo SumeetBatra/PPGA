@@ -55,6 +55,7 @@ def parse_args():
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
                                                                     " CMA-ES instances exploring the archive")
     parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
+    parser.add_argument("--mega_lambda", type=int, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
 
     args = parser.parse_args()
     args.batch_size = int(args.num_workers * args.envs_per_worker * args.rollout_length)

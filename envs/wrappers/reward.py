@@ -22,6 +22,7 @@ class TotalReward(gym.core.RewardWrapper):
     def __init__(self, env):
         super().__init__(env)
         self.total_reward = 0
+        self.T = 0
 
     def reward(self, reward):
         pass
@@ -29,11 +30,14 @@ class TotalReward(gym.core.RewardWrapper):
     def step(self, action):
         obs, rew, done, info = self.env.step(action)
         self.total_reward += rew
+        self.T += 1
         info['total_reward'] = self.total_reward
+        info['traj_length'] = self.T
         return obs, rew, done, info
 
     def reset(self):
         self.total_reward = 0
+        self.T = 0
         obs = self.env.reset()
         return obs
 

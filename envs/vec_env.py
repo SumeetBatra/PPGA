@@ -18,6 +18,7 @@ class VecEnv(EventLoopObject, gym.Env):
         gym.Env.__init__(self)
         self.double_buffered_sampling = double_buffered_sampling
         self.num_workers = num_workers
+        self.envs_per_worker = envs_per_worker
 
         dummy_env = make_env(env_name, seed=0, gamma=cfg.gamma)()
         self.single_observation_space = dummy_env.observation_space
@@ -35,6 +36,7 @@ class VecEnv(EventLoopObject, gym.Env):
         self.res_buffer = torch.zeros((num_workers, envs_per_worker, total_dims)).share_memory_()
         self.done_buffer = torch.zeros((num_workers,)).share_memory_()
         self.infos = {'total_reward': torch.zeros(num_workers, envs_per_worker).share_memory_(),
+                      'traj_length': torch.zeros(num_workers, envs_per_worker).share_memory_(),
                       # final measures averaged over length of trajectory (non-markovian)
                       'bc': torch.zeros((num_workers, envs_per_worker, self.measure_dim)).share_memory_(),
                       # per timestep measure (markovian??)
@@ -74,8 +76,8 @@ class VecEnv(EventLoopObject, gym.Env):
     def stop(self):
         pass
 
-    def step(self, action):
-        self.step_signal.emit(action)
+    def step(self, action, autoreset=True):
+        self.step_signal.emit(action, autoreset)
         while not all(self.done_buffer):
             ...
         res = self.res_buffer.detach().clone().reshape(self.num_envs, -1)
@@ -91,9 +93,10 @@ class VecEnv(EventLoopObject, gym.Env):
         self.reset_signal.emit()
         while not all(self.done_buffer):
             ...
-        obs = self.res_buffer[:, :, :self.obs_dim]
+        res = self.res_buffer.detach().clone().reshape(self.num_envs, -1)
+        obs = res[:, :self.obs_dim]
         self.done_buffer[:] = 0
-        return obs.reshape(self.num_envs, -1).detach().clone()
+        return obs
 
     def connect_signals_to_slots(self):
         if self.double_buffered_sampling:
