@@ -10,8 +10,26 @@ from envs.env import make_env
 from envs.worker import Worker
 
 
+def make_vec_env(cfg):
+    vec_env = VecEnv(cfg,
+                     cfg.env_name,
+                     num_workers=cfg.num_workers,
+                     envs_per_worker=cfg.envs_per_worker,
+                     seed=cfg.seed)
+    return vec_env
+
+
+def make_vec_env_for_eval(cfg, num_workers, envs_per_worker):
+    vec_env = VecEnv(cfg,
+                     cfg.env_name,
+                     num_workers,
+                     envs_per_worker)
+
+    return vec_env
+
+
 class VecEnv(EventLoopObject, gym.Env):
-    def __init__(self, cfg, env_name: str, num_workers, envs_per_worker=1, double_buffered_sampling=False):
+    def __init__(self, cfg, env_name: str, num_workers, envs_per_worker=1, double_buffered_sampling=False, seed=None):
         self.cfg = cfg
         process = EventLoopProcess('main')
         EventLoopObject.__init__(self, process.event_loop, 'QDVecEnv')
@@ -19,6 +37,7 @@ class VecEnv(EventLoopObject, gym.Env):
         self.double_buffered_sampling = double_buffered_sampling
         self.num_workers = num_workers
         self.envs_per_worker = envs_per_worker
+        self.seed = seed  # if the seed is set, then all envs will get the same seed, making the environments deterministic. Good for debugging
 
         dummy_env = make_env(env_name, seed=0, gamma=cfg.gamma)()
         self.single_observation_space = dummy_env.observation_space
@@ -50,7 +69,8 @@ class VecEnv(EventLoopObject, gym.Env):
                                self.done_buffer,
                                self.infos,
                                render=False,
-                               num_envs=envs_per_worker) for i in range(num_workers)]
+                               num_envs=envs_per_worker,
+                               seed=self.seed) for i in range(num_workers)]
         self.num_envs = num_workers * envs_per_worker
         self.connect_signals_to_slots()
         for proc in self.worker_processes:

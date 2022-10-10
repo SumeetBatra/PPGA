@@ -1,14 +1,7 @@
-import sys
-import gym
-import QDgym
-import numpy as np
-import torch
 from attrdict import AttrDict
 from RL.ppo import *
 from utils.utils import log
-from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared
 from envs.env import make_env
-from QDgym.QDgym_envs import QDAntBulletEnv
 from models.actor_critic import QDActorCriticShared
 
 

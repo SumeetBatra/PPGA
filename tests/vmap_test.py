@@ -4,7 +4,7 @@ import numpy as np
 import time
 from functorch import vmap
 from functorch import combine_state_for_ensemble
-from utils.vectorized import BatchMLP
+from models.vectorized import BatchMLP
 from functools import partial
 
 

@@ -1,55 +1,89 @@
 import numpy as np
 import torch
+import gym
 import random
 
 from attrdict import AttrDict
 from time import time
-from envs.vec_env import VecEnv
+from envs.vec_env import make_vec_env, make_env
 from utils.utils import log
-from utils.vectorized2 import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared
-from models.actor_critic import ActorCriticSeparate, ActorCriticShared, QDActorCriticShared
+from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared
+from models.actor_critic import ActorCriticShared, QDActorCriticShared, Agent
+
+TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
+            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0})
 
 
 def test_vec_env():
-    num_workers = 4
-    envs_per_worker = 1
-    vec_env = VecEnv('QDAntBulletEnv-v0', num_workers=num_workers, envs_per_worker=envs_per_worker)
+    cfg = {'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 4, 'envs_per_worker': 2,
+           'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0}
+    cfg = AttrDict(cfg)
+    num_envs = cfg.num_workers * cfg.envs_per_worker
+    # test to make sure we get all obs back and with the right dims
+    vec_env = make_vec_env(cfg)
     obs_dim = vec_env.obs_dim
-    rand_act = np.random.randn(8)
+    action_dim = vec_env.single_action_space.shape[0]
+    rand_act = torch.randn(num_envs, action_dim)
     vec_env.reset()
-    obs, rew, done = vec_env.step(rand_act)
+    obs, rew, done, infos = vec_env.step(rand_act)
     log.debug(f'{obs=} \n {rew=} \n {done=}')
     log.debug(f'obs shape: {obs.shape}')
-    assert obs.shape == torch.Size([num_workers, envs_per_worker, obs_dim + 2])
+    assert obs.shape == torch.Size([cfg.num_workers * cfg.envs_per_worker, obs_dim])
 
 
-# def test_throughput():
-#     num_workers = 32
-#     envs_per_worker = 1
-#     vec_env = VecEnv('QDAntBulletEnv-v0', num_workers=num_workers, envs_per_worker=1)
-#     vec_env.reset()
-#     num_steps = 1000
-#     all_obs = []
-#     start_time = time()
-#     for _ in range(num_steps):
-#         rand_act = np.random.randn(8)
-#         obs = vec_env.step(rand_act)
-#         all_obs.append(obs)
-#     elapsed = time() - start_time
-#     total_env_steps = num_steps * num_workers * envs_per_worker
-#     fps = total_env_steps / elapsed
-#     log.debug(f'{fps=}')
-#     all_obs = torch.cat(all_obs)
-#     log.debug(f"Total obs collected: {all_obs.shape[0]}")
+def test_compare_vec_env_to_gym_env():
+    # test to make sure the vec_env implementation returns the same obs as a standard openai gym implementation
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    torch.backends.cudnn.deterministic = True
+
+    cfg = {'normalize_rewards': False, 'normalize_obs': False, 'num_workers': 4, 'envs_per_worker': 2,
+           'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0}
+    cfg = AttrDict(cfg)
+    num_envs = cfg.num_workers * cfg.envs_per_worker
+    # test to make sure we get all obs back and with the right dims
+    vec_env = make_vec_env(cfg)
+    action_dim = vec_env.single_action_space.shape[0]
+
+    env_fns = [make_env('QDAntBulletEnv-v0', seed=0, gamma=cfg.gamma) for i in range(num_envs)]
+    gym_envs = gym.vector.AsyncVectorEnv(env_fns, vec_env.single_observation_space, vec_env.single_action_space)
+
+    vec_env.reset()
+    gym_envs.reset()
+    random_traj = torch.randn(10, num_envs, action_dim)
+    obs, gym_obs, rews, gym_rews = [], [], [], []
+    for actions in random_traj:
+        next_obs, rew, _, _ = vec_env.step(actions)
+        gym_next_obs, gym_rew, _, _ = gym_envs.step(actions)
+        gym_next_obs = torch.from_numpy(gym_next_obs)
+        gym_rew = torch.from_numpy(gym_rew)
+
+        obs.append(next_obs)
+        gym_obs.append(gym_next_obs)
+        rews.append(rew)
+        gym_rews.append(gym_rew)
+
+    obs = torch.cat(obs, dim=0)
+    gym_obs = torch.cat(gym_obs, dim=0)
+    rews = torch.cat(rews, dim=0)
+    gym_rews = torch.cat(gym_rews, dim=0).to(torch.float32)
+
+    assert torch.allclose(obs, gym_obs) and torch.allclose(rews, gym_rews)
 
 
-def test_vectorized_inference():
+# TODO: figure out why this doesn't work
+def test_vectorized_policy():
+    global TEST_CFG
+    dummy_env = make_env(TEST_CFG.env_name, seed=0, gamma=TEST_CFG.gamma)()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    obs_shape, action_shape = (8,), np.array(2)
-    models = [Agent(obs_shape, action_shape).to(device) for _ in range(10)]
-    vec_model = VectorizedPolicy(models, Agent)
-    obs = torch.randn((10, 8)).to(device)
+    obs_shape, action_shape = dummy_env.observation_space.shape, dummy_env.action_space.shape
+    num_models = 10
+    models = [ActorCriticShared(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
+    vec_model = VectorizedActorCriticShared(TEST_CFG, models, ActorCriticShared).to(device)
+    obs = torch.randn((num_models, *obs_shape)).to(device)
 
+    # test same number of models as number of obs
     res_for_loop = []
     start_for = time()
     for o, model in zip(obs, models):
@@ -66,6 +100,28 @@ def test_vectorized_inference():
                                                          "same outputs as naive for-loop over all the individual models"
 
     print(f'For loop over models took {elapsed_for:.2f} seconds. Vectorized inference took {elapsed_vec:.2f} seconds')
+
+    # test multiple obs per model
+    num_models = 7
+    num_obs = num_models * 2
+
+    models = [ActorCriticShared(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
+    vec_model = VectorizedActorCriticShared(TEST_CFG, models, ActorCriticShared).to(device)
+    obs = torch.randn((num_obs, *obs_shape)).to(device)
+
+    with torch.no_grad():
+        res_vectorized = vec_model(obs)
+        res_for_loop = []
+        obs = obs.reshape(num_models, -1, *obs_shape)
+        for next_obs, model in zip(obs, models):
+            obs1, obs2 = next_obs[0].reshape(1, -1), next_obs[1].reshape(1, -1)
+            res_for_loop.append(model(obs1))
+            res_for_loop.append(model(obs2))
+
+    res_for_loop = torch.cat(res_for_loop).flatten()
+    res_vectorized = res_vectorized.flatten()
+
+    assert torch.allclose(res_for_loop, res_vectorized)
 
 
 # from https://gist.github.com/rohan-varma/a0a75e9a0fbe9ccc7420b04bff4a7212
@@ -229,4 +285,4 @@ def test_policy_serialize_deserialize():
 
 
 if __name__ == '__main__':
-    test_vec_env()
+    try_vec_env()

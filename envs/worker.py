@@ -6,12 +6,12 @@ from envs.env import make_env
 
 
 class Worker(EventLoopObject):
-    def __init__(self, cfg, pid, event_loop, object_id, res_buffer, done_buffer, infos, render=False, num_envs=1):
+    def __init__(self, cfg, pid, event_loop, object_id, res_buffer, done_buffer, infos, render=False, num_envs=1, seed=None):
         EventLoopObject.__init__(self, event_loop, object_id)
         self.cfg = cfg
-        seeds = np.random.random_integers(0, 10000, size=num_envs)
-        # seed = 0  # make the environment deterministic for debugging
-        self.envs = [make_env(cfg.env_name, seed=seeds[i].item(), gamma=cfg.gamma)() for i in range(num_envs)]
+        if seed is None:
+            seed = np.random.randint(0, 10000)
+        self.envs = [make_env(cfg.env_name, seed=seed, gamma=cfg.gamma)() for i in range(num_envs)]
         self.pid = pid
         self.res_buffer = res_buffer
         self.done_buffer = done_buffer

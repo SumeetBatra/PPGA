@@ -30,9 +30,8 @@ class VectorizedLinearBlock(nn.Module):
 
 
 class VectorizedPolicy(StochasticPolicy):
-    def __init__(self, models, model_fn, **kwargs):
-        StochasticPolicy.__init__(self, normalize_obs=kwargs.get('normalize_obs', False),
-                                  normalize_rewards=kwargs.get('normalize_rewards', False))
+    def __init__(self, cfg, models, model_fn, **kwargs):
+        StochasticPolicy.__init__(self, cfg)
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -85,6 +84,9 @@ class VectorizedPolicy(StochasticPolicy):
 
     def forward(self, x):
         return self.layers(x)
+
+    def get_action(self, obs, action=None):
+        pass
 
 
 class VectorizedActorCriticShared(StochasticPolicy):

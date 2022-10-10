@@ -1,60 +1,21 @@
-import gym.vector
 import numpy as np
 import random
-import time
 import copy
 
 import torch
 import torch.nn as nn
-
-import utils.utils
 import wandb
 
 from collections import deque
 from functorch import vmap, combine_state_for_ensemble
-from envs.vec_env import VecEnv
-from envs.env import make_env
+from envs.vec_env import make_vec_env, make_vec_env_for_eval
 from utils.utils import log, save_checkpoint
-from utils.vectorized2 import VectorizedActorCriticShared, QDVectorizedActorCriticShared
-from envs.wrappers.normalize_torch import NormalizeReward, NormalizeObservation
-from models.actor_critic import QDActorCriticShared, ActorCriticShared
-from QDgym.QDgym_envs import QDAntBulletEnv
+from models.vectorized import QDVectorizedActorCriticShared
+from models.actor_critic import QDActorCriticShared
 
 
 # based off of the clean-rl implementation
 # https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo_continuous_action.py
-
-
-def make_vec_env(cfg):
-    vec_env = VecEnv(cfg,
-                     cfg.env_name,
-                     num_workers=cfg.num_workers,
-                     envs_per_worker=cfg.envs_per_worker)
-    # these wrappers are applied at the vecenv level instead of the single env level
-    # if cfg.normalize_obs:
-    #     vec_env = NormalizeObservation(vec_env)
-    # if cfg.normalize_rewards:
-    #     vec_env = NormalizeReward(vec_env, gamma=cfg.gamma)
-    return vec_env
-
-
-def make_vec_env_for_eval(cfg, num_workers, envs_per_worker):
-    vec_env = VecEnv(cfg,
-                     cfg.env_name,
-                     num_workers,
-                     envs_per_worker)
-
-    return vec_env
-
-
-def gradient(agent):
-    """Returns 1D array with gradient of all parameters in the actor."""
-    return np.concatenate(
-        [p.grad.cpu().detach().numpy().ravel() for p in agent.parameters()])
-
-
-def gradient_linear(agent):
-    return [p.grad.cpu().detach().numpy().ravel() for p in agent.actor.parameters()][0]
 
 
 class PPO:
@@ -250,13 +211,10 @@ class PPO:
                 measures = infos['measures']
                 self.measures[step] = measures
 
-                # log.debug(f'{global_step=}')
                 for i, done in enumerate(next_done.flatten()):
                     if done:
                         total_reward = infos['total_reward'][i]
                         log.debug(f'{total_reward=}')
-                        # if total_reward < 10:
-                        #     log.error(f'{total_reward=}')
                         self.episodic_returns.append(infos['total_reward'][i])
 
             advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
@@ -353,7 +311,7 @@ class PPO:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
                 acts = acts.unsqueeze(1)
-                obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy(), autoreset=True)  # TODO: fix this. In general, we should not be autoresetting here
+                obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy(), autoreset=True)  # TODO: I think we should not be autoresetting here??
                 obs = obs.to(self.device)
                 total_reward += rew.detach().cpu().numpy().reshape(vec_agent.num_models, -1)
                 dones = torch.logical_or(dones, next_dones)
@@ -373,7 +331,7 @@ class PPO:
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)
 
-    def evaluate_lander_vectorized(self, weights, num_steps):
+    def evaluate_lander_vectorized_vmap(self, weights, num_steps):
         obs_shape, action_shape = self.vec_env.single_observation_space.shape, self.vec_env.single_action_space.shape
         agents = [LinearPolicy(obs_shape, action_shape).to(self.device) for _ in range(len(weights))]
         for agent, w in zip(agents, weights):
