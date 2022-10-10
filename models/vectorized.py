@@ -13,7 +13,7 @@ class VectorizedLinearBlock(nn.Module):
         super().__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.weight = nn.Parameter(weights).to(self.device)  # one slice of all the mlps we want to process as a batch
-        self.bias = nn.Parameter(biases).to(self.device)
+        self.bias = nn.Parameter(biases).to(self.device) if biases is not None else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         obs_per_weight = x.shape[0] // self.weight.shape[0]
@@ -25,6 +25,7 @@ class VectorizedLinearBlock(nn.Module):
             y += self.bias
 
         out_features = self.weight.shape[1]
+        y = torch.transpose(y, 0, 1)
         y = torch.reshape(y, shape=(-1, out_features))
         return y
 
@@ -41,22 +42,22 @@ class VectorizedPolicy(StochasticPolicy):
         self.layers = nn.Sequential(*self.blocks)
         self.action_logstds = None
         if hasattr(models[0], '_actor_logstd'):
-            action_logprobs = [model.actor_logstd for model in models]
+            action_logprobs = [model._actor_logstd for model in models]
             self.action_logstds = nn.Parameter(torch.cat(action_logprobs)).to(self.device)
         self.kwargs = kwargs
 
     def _vectorize_models(self, models):
-        num_layers = len(models[0].layers)
+        num_layers = len(models[0].actor_mean)
         blocks = []
         for i in range(0, num_layers):
-            if not isinstance(models[0].layers[i], nn.Linear):
+            if not isinstance(models[0].actor_mean[i], nn.Linear):
                 continue
-            weights_slice = [models[j].layers[i].weight.to(self.device) for j in range(self.num_models)]
-            bias_slice = [models[j].layers[i].bias.to(self.device) for j in range(self.num_models)]
+            weights_slice = [models[j].actor_mean[i].weight.to(self.device) for j in range(self.num_models)]
+            bias_slice = [models[j].actor_mean[i].bias.to(self.device) for j in range(self.num_models)]
 
             weights_slice = torch.stack(weights_slice)
             bias_slice = torch.stack(bias_slice)
-            nonlinear = models[0].layers[i + 1] if i + 1 < num_layers else None
+            nonlinear = models[0].actor_mean[i + 1] if i + 1 < num_layers else None
             block = VectorizedLinearBlock(weights_slice, bias_slice)
             blocks.append(block)
             if nonlinear is not None:

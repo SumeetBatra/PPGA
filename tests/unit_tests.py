@@ -7,7 +7,7 @@ from attrdict import AttrDict
 from time import time
 from envs.vec_env import make_vec_env, make_env
 from utils.utils import log
-from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared
+from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared, VectorizedLinearBlock
 from models.actor_critic import ActorCriticShared, QDActorCriticShared, Agent
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
@@ -72,6 +72,27 @@ def test_compare_vec_env_to_gym_env():
     assert torch.allclose(obs, gym_obs) and torch.allclose(rews, gym_rews)
 
 
+def test_vec_block():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    weights = torch.randn(10, 5, 4).to(device)
+    block = VectorizedLinearBlock(weights, device=device)
+    obs = torch.randn(20, 4).to(device)
+
+    res_vectorized = block(obs)
+    res_for_loop = []
+
+    weights = torch.transpose(weights, 1, 2)
+    obs = obs.reshape(10, 2, 4)
+    for next_obs, w in zip(obs, weights):
+        obs1, obs2 = next_obs[0], next_obs[1]
+        res_for_loop.append(obs1 @ w)
+        res_for_loop.append(obs2 @ w)
+    res_for_loop = torch.cat(res_for_loop).flatten()
+    res_vectorized = res_vectorized.flatten()
+
+    assert torch.allclose(res_for_loop, res_vectorized)
+
+
 # TODO: figure out why this doesn't work
 def test_vectorized_policy():
     global TEST_CFG
@@ -103,10 +124,10 @@ def test_vectorized_policy():
 
     # test multiple obs per model
     num_models = 7
-    num_obs = num_models * 2
+    num_obs = num_models * 3
 
-    models = [ActorCriticShared(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
-    vec_model = VectorizedActorCriticShared(TEST_CFG, models, ActorCriticShared).to(device)
+    models = [Agent(obs_shape, action_shape).to(device) for _ in range(num_models)]
+    vec_model = VectorizedPolicy(TEST_CFG, models, ActorCriticShared).to(device)
     obs = torch.randn((num_obs, *obs_shape)).to(device)
 
     with torch.no_grad():
@@ -114,9 +135,10 @@ def test_vectorized_policy():
         res_for_loop = []
         obs = obs.reshape(num_models, -1, *obs_shape)
         for next_obs, model in zip(obs, models):
-            obs1, obs2 = next_obs[0].reshape(1, -1), next_obs[1].reshape(1, -1)
+            obs1, obs2, obs3 = next_obs[0].reshape(1, -1), next_obs[1].reshape(1, -1), next_obs[2].reshape(1, -1)
             res_for_loop.append(model(obs1))
             res_for_loop.append(model(obs2))
+            res_for_loop.append(model(obs3))
 
     res_for_loop = torch.cat(res_for_loop).flatten()
     res_vectorized = res_vectorized.flatten()
