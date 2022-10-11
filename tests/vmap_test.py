@@ -2,10 +2,16 @@ import torch
 import torch.nn as nn
 import numpy as np
 import time
+from attrdict import AttrDict
+from envs.env import make_env
 from functorch import vmap
 from functorch import combine_state_for_ensemble
-from models.vectorized import BatchMLP
+from models.vectorized import QDVectorizedActorCriticShared
+from models.actor_critic import QDActorCriticShared
 from functools import partial
+
+TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
+            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0})
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -62,6 +68,30 @@ def test_vmap():
         acts_vmap = vmap(fmodel)(params, buffers, next_obs)
     elapsed = time.time() - start_time
     print(f'Execution of vmap took {elapsed:.2f} seconds')
+
+
+def test_check_vmap_to_vectorized():
+    global TEST_CFG
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    dummy_env = make_env('QDAntBulletEnv-v0', seed=0, gamma=0.99)()
+    obs_dim = dummy_env.observation_space.shape[0]
+    batch_obs = torch.randn((10, obs_dim)).to(device)
+
+    obs_shape = dummy_env.observation_space.shape
+    action_shape = dummy_env.action_space.shape
+
+    # half the agents as there are "envs"
+    agents = [QDActorCriticShared(TEST_CFG, obs_shape, action_shape, num_dims=TEST_CFG.num_dims).to(device) for _ in range(5)]
+    fmodel, params, buffers = combine_state_for_ensemble(agents)
+
+    batch_obs = batch_obs.reshape(5, 2, obs_dim)
+    res_vmap = vmap(fmodel)(params, buffers, batch_obs).flatten()
+
+    vec_agents = QDVectorizedActorCriticShared(TEST_CFG, agents, QDActorCriticShared, measure_dims=TEST_CFG.num_dims)
+    batch_obs = batch_obs.reshape(10, obs_dim)
+    res_vectorized = vec_agents(batch_obs).flatten()
+
+    assert torch.allclose(res_vmap, res_vectorized)
 
 
 def test_vectorized():

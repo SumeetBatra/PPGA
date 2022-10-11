@@ -125,6 +125,7 @@ class QDActorCriticShared(ActorCriticShared):
         self.num_dims = num_dims
         # create new critic heads, one for each measure
         self.measure_critic_heads = nn.Sequential(layer_init(nn.Linear(64, num_dims), std=1.0))
+        self.measure_coeffs = torch.zeros(num_dims)  # algorithm should be responsible for changing this
 
     def get_measure_values(self, obs):
         core_out = self.core(obs)

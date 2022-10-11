@@ -219,6 +219,8 @@ class QDVectorizedActorCriticShared(VectorizedActorCriticShared):
         self.measure_dims = measure_dims
         self.measure_critic_head_blocks = self._vectorize_layers('measure_critic_heads', models)
         self.measure_critic_heads = nn.Sequential(*self.measure_critic_head_blocks)
+        measure_coeffs = [model.measure_coeffs for model in models]
+        self.measure_coeffs = torch.cat(measure_coeffs, dim=0).reshape(self.num_models, -1)
 
     def get_measure_values(self, obs):
         core_out = self.core(obs)

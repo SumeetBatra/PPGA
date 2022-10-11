@@ -9,9 +9,10 @@ class Worker(EventLoopObject):
     def __init__(self, cfg, pid, event_loop, object_id, res_buffer, done_buffer, infos, render=False, num_envs=1, seed=None):
         EventLoopObject.__init__(self, event_loop, object_id)
         self.cfg = cfg
-        if seed is None:
-            seed = np.random.randint(0, 10000)
-        self.envs = [make_env(cfg.env_name, seed=seed, gamma=cfg.gamma)() for i in range(num_envs)]
+        # if seed is None:
+        seed = np.random.randint(0, 10000)
+        self.envs = [make_env(cfg.env_name, seed=seed + i, gamma=cfg.gamma,
+                              measure_coeffs=cfg.get('measure_coeffs', None))() for i in range(num_envs)]
         self.pid = pid
         self.res_buffer = res_buffer
         self.done_buffer = done_buffer

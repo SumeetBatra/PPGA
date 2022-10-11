@@ -126,8 +126,8 @@ def test_vectorized_policy():
     num_models = 7
     num_obs = num_models * 3
 
-    models = [Agent(obs_shape, action_shape).to(device) for _ in range(num_models)]
-    vec_model = VectorizedPolicy(TEST_CFG, models, ActorCriticShared).to(device)
+    models = [QDActorCriticShared(TEST_CFG, obs_shape, action_shape, TEST_CFG.num_dims).to(device) for _ in range(num_models)]
+    vec_model = QDVectorizedActorCriticShared(TEST_CFG, models, ActorCriticShared, TEST_CFG.num_dims).to(device)
     obs = torch.randn((num_obs, *obs_shape)).to(device)
 
     with torch.no_grad():

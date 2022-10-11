@@ -1,4 +1,5 @@
 import gym
+import numpy as np
 
 
 class ForwardReward(gym.core.RewardWrapper):
@@ -55,6 +56,25 @@ class QDReward(gym.core.RewardWrapper):
         obs, rew, done, info = self.env.step(action)
         measures = self.robot.feet_contact
         info['measures'] = measures
+        return obs, rew, done, info
+
+
+class QDRLReward(gym.core.RewardWrapper):
+    '''
+    Combine the standard RL objective with the QD measure proxies as a joint, multi-objective reward function
+    '''
+
+    def __init__(self, env, measure_coeffs):
+        super().__init__(env)
+        if not isinstance(measure_coeffs, np.ndarray):
+            measure_coeffs = np.array(measure_coeffs)
+        self.measure_coeffs = measure_coeffs
+
+    def step(self, action):
+        obs, rew, done, info = self.env.step(action)
+        measures = self.robot.feet_contact
+        m_rew = np.dot(measures, self.measure_coeffs)
+        rew += m_rew
         return obs, rew, done, info
 
 
