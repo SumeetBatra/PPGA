@@ -4,6 +4,8 @@ from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utils import config_wandb
 from RL.ppo import PPO
+from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
+from envs.brax_custom.gpu_env import make_vec_env_brax
 
 
 def parse_args():
@@ -19,6 +21,11 @@ def parse_args():
 
     # algorithm args
     parser.add_argument('--total_timesteps', type=int, default=1000000)
+    parser.add_argument('--env_type', type=str, choices=['cpu', 'brax'], help='Whether to use cpu-envs or gpu-envs for rollouts')
+    # args for brax
+    parser.add_argument('--env_batch_size', default=1, type=int, help='Number of parallel environments to run')
+
+    # args for cpu-envs
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of worker processes to spawn. '
                              'Should always be <= number of logical cores on your machine')
@@ -58,10 +65,6 @@ def parse_args():
     parser.add_argument("--mega_lambda", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
 
     args = parser.parse_args()
-    args.batch_size = int(args.num_workers * args.envs_per_worker * args.rollout_length)
-    args.minibatch_size = int(args.batch_size // args.num_minibatches)
-    args.num_envs = int(args.num_workers * args.envs_per_worker)
-    args.envs_per_model = args.num_envs // args.num_emitters
     cfg = AttrDict(vars(args))
     return cfg
 
@@ -69,10 +72,25 @@ def parse_args():
 if __name__ == '__main__':
     cfg = parse_args()
 
+    if cfg.env_type == 'cpu':
+        vec_env = make_vec_env(cfg)
+        cfg.batch_size = int(cfg.num_workers * cfg.envs_per_worker * cfg.rollout_length)
+        cfg.num_envs = int(cfg.num_workers * cfg.envs_per_worker)
+        cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
+    elif cfg.env_type == 'brax':
+        vec_env = make_vec_env_brax(cfg)
+        cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
+        cfg.num_envs = int(cfg.env_batch_size)
+        cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
+    else:
+        raise NotImplementedError(f'{cfg.env_type} is undefined for "env_type"')
+
+    cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
+
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
 
-    alg = PPO(cfg.seed, cfg)
+    alg = PPO(cfg.seed, cfg, vec_env)
     num_updates = cfg.total_timesteps // cfg.batch_size
     alg.train(num_updates, rollout_length=cfg.rollout_length)
     sys.exit(0)

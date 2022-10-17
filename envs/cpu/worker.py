@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from signal_slot.signal_slot import *
-from envs.env import make_env
+from envs.cpu.env import make_env
 
 
 class Worker(EventLoopObject):

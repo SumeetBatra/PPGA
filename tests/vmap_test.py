@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import time
 from attrdict import AttrDict
-from envs.env import make_env
+from envs.cpu.env import make_env
 from functorch import vmap
 from functorch import combine_state_for_ensemble
 from models.vectorized import QDVectorizedActorCriticShared

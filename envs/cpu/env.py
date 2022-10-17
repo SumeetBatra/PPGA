@@ -3,6 +3,7 @@ import QDgym
 import numpy as np
 from envs.wrappers.normalize_numpy import NormalizeObservation, NormalizeReward
 from envs.wrappers.reward import ForwardReward, TotalReward, QDReward, QDRLReward
+from QDgym.QDgym_envs import QDAntBulletEnv
 
 
 def make_env(env_id, seed, gamma, measure_coeffs=None):

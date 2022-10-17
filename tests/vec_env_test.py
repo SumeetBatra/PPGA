@@ -1,6 +1,6 @@
 import numpy as np
 import gym
-from envs.env import make_env
+from envs.cpu.env import make_env
 
 
 def test_vec_env():

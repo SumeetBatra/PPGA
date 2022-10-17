@@ -6,8 +6,7 @@ import torch
 import torch.nn as nn
 import wandb
 from collections import deque
-from functorch import vmap, combine_state_for_ensemble
-from envs.vec_env import make_vec_env, make_vec_env_for_eval
+from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
 from utils.utils import log, save_checkpoint
 from models.vectorized import QDVectorizedActorCriticShared
 from models.actor_critic import QDActorCriticShared
@@ -18,36 +17,36 @@ from models.actor_critic import QDActorCriticShared
 
 
 class PPO:
-    def __init__(self, seed, cfg):
-        self.vec_env = make_vec_env(cfg)
+    def __init__(self, seed, cfg, vec_env):
+        self.vec_env = vec_env
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        obs_shape = self.vec_env.single_observation_space.shape
-        action_shape = self.vec_env.single_action_space.shape
+        self.obs_shape = self.vec_env.single_observation_space.shape
+        self.action_shape = self.vec_env.single_action_space.shape
         # TODO: testing multi-agent QDRL multi-objective learning
-        agent1 = QDActorCriticShared(cfg, obs_shape, action_shape, cfg.num_dims).to(self.device)
+        agent1 = QDActorCriticShared(cfg, self.obs_shape, self.action_shape, cfg.num_dims).to(self.device)
         agent1.measure_coeffs = torch.ones(cfg.num_dims) * -1.0
         self._agents = [agent1]
         self.vec_inference = QDVectorizedActorCriticShared(cfg, self._agents, QDActorCriticShared, cfg.num_dims,
-                                                           obs_shape=obs_shape, action_shape=action_shape).to(
+                                                           obs_shape=self.obs_shape, action_shape=self.action_shape).to(
             self.device)
         self.optimizers = [torch.optim.Adam(agent.parameters(), lr=cfg.learning_rate, eps=1e-5) for agent in self._agents]
         self.cfg = cfg
 
-        # single policy eval env
-        single_eval_cfg = copy.deepcopy(cfg)
-        single_eval_cfg.num_workers = 4
-        single_eval_cfg.envs_per_worker = 1
-        single_eval_cfg.envs_per_model = 4
-        self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
-                                                     envs_per_worker=single_eval_cfg.envs_per_worker)
-
-        # multi-policy eval
-        multi_eval_cfg = copy.deepcopy(cfg)
-        multi_eval_cfg.num_workers = cfg.mega_lambda
-        multi_eval_cfg.envs_per_worker = 4
-        multi_eval_cfg.envs_per_model = 4
-        self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
-                                                    envs_per_worker=multi_eval_cfg.envs_per_worker)
+        # # single policy eval env
+        # single_eval_cfg = copy.deepcopy(cfg)
+        # single_eval_cfg.num_workers = 4
+        # single_eval_cfg.envs_per_worker = 1
+        # single_eval_cfg.envs_per_model = 4
+        # self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
+        #                                              envs_per_worker=single_eval_cfg.envs_per_worker)
+        #
+        # # multi-policy eval
+        # multi_eval_cfg = copy.deepcopy(cfg)
+        # multi_eval_cfg.num_workers = cfg.mega_lambda
+        # multi_eval_cfg.envs_per_worker = 4
+        # multi_eval_cfg.envs_per_model = 4
+        # self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
+        #                                             envs_per_worker=multi_eval_cfg.envs_per_worker)
 
         # metrics for logging
         self.metric_last_n_window = 10
@@ -75,6 +74,10 @@ class PPO:
         self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
         self.measure_values = torch.zeros_like(self.measures).to(self.device)
+
+        next_obs = self.vec_env.reset()
+        self.next_obs = next_obs.to(self.device)
+        self.next_done = torch.zeros(self.vec_env.num_envs).to(self.device)
 
     @property
     def agents(self):
@@ -177,9 +180,6 @@ class PPO:
 
     def train(self, num_updates, rollout_length):
         global_step = 0
-        next_obs = self.vec_env.reset()
-        next_obs = next_obs.to(self.device)
-        next_done = torch.zeros(self.vec_env.num_envs).to(self.device)
 
         num_agents = len(self._agents)
 
@@ -196,43 +196,44 @@ class PPO:
             for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
                 if self.cfg.normalize_obs:
-                    next_obs = self.vec_inference.vec_normalize_obs(next_obs)
-                self.obs[step] = next_obs
-                self.dones[step] = next_done.view(-1)
+                    self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
+                self.obs[step] = self.next_obs
+                self.dones[step] = self.next_done.view(-1)
 
                 with torch.no_grad():
-                    action, logprob, _ = self.vec_inference.get_action(next_obs)
-                    value = self.vec_inference.get_value(next_obs)
+                    action, logprob, _ = self.vec_inference.get_action(self.next_obs)
+                    value = self.vec_inference.get_value(self.next_obs)
                     self.values[step] = value.flatten()
                     if self.cfg.algorithm == 'qd-ppo':
-                        measure_values = self.vec_inference.get_measure_values(next_obs)
+                        measure_values = self.vec_inference.get_measure_values(self.next_obs)
                         self.measure_values[step] = measure_values
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
-                next_obs, reward, next_done, infos = self.vec_env.step(action.cpu().numpy())
-                next_obs = next_obs.to(self.device)
+                self.next_obs, reward, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
+                reward = reward.cpu()
+                self.next_obs = self.next_obs.to(self.device)
                 if self.cfg.normalize_rewards:
-                    reward = self.vec_inference.vec_normalize_rewards(reward, next_done)
+                    reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
                 self.rewards[step] = reward.squeeze()
 
-                measures = infos['measures']
-                self.measures[step] = measures
+                # measures = infos['measures']
+                # self.measures[step] = measures
 
                 ########################################
                 ## EXPERIMENTAL
-                m_reward = (measures.unsqueeze(dim=1).reshape(len(self._agents), -1, self.cfg.num_dims) *
-                            self.vec_inference.measure_coeffs.unsqueeze(dim=1)).sum(dim=2).reshape(-1)
-                reward += m_reward
+                # m_reward = (measures.unsqueeze(dim=1).reshape(len(self._agents), -1, self.cfg.num_dims) *
+                #             self.vec_inference.measure_coeffs.unsqueeze(dim=1)).sum(dim=2).reshape(-1)
+                # reward += m_reward
                 ########################################
 
-                for i, done in enumerate(next_done.flatten()):
+                for i, done in enumerate(self.next_done.flatten()):
                     if done:
-                        total_reward = infos['total_reward'][i]
+                        total_reward = -infos['total_reward'][i]  # TODO: why is reward negative when using brax??
                         log.debug(f'{total_reward=}')
-                        self.episodic_returns.append(infos['total_reward'][i])
+                        self.episodic_returns.append(-infos['total_reward'][i])
 
-            advantages, returns = self.calculate_rewards(next_obs, next_done, self.rewards, self.values, self.dones,
+            advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values, self.dones,
                                                          rollout_length=self.cfg.rollout_length)
             # flatten the batch
             b_obs = self.obs.reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
@@ -253,8 +254,8 @@ class PPO:
             # TODO: create an update_params() method instead of recreating vec_inf each time
             self.vec_inference = QDVectorizedActorCriticShared(self.cfg, self._agents, QDActorCriticShared,
                                                                measure_dims=self.cfg.num_dims,
-                                                               obs_shape=self.vec_env.obs_shape,
-                                                               action_shape=self.vec_env.action_space.shape)
+                                                               obs_shape=self.obs_shape,
+                                                               action_shape=self.action_shape)
 
             #########################
             ### TESTING #############
@@ -335,7 +336,7 @@ class PPO:
             obs_mean = self.vec_inference.obs_normalizer.obs_rms.mean.to(self.device)
             obs_var = self.vec_inference.obs_normalizer.obs_rms.var.to(self.device)
 
-        while not all(dones):
+        for _ in range(1000):
             with torch.no_grad():
                 if self.cfg.normalize_obs:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)

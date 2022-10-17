@@ -2,12 +2,10 @@ import copy
 
 import torch
 import gym
-import numpy as np
 from signal_slot.signal_slot import *
 
-from utils.utils import log
-from envs.env import make_env
-from envs.worker import Worker
+from envs.cpu.env import make_env
+from envs.cpu.worker import Worker
 
 
 def make_vec_env(cfg):

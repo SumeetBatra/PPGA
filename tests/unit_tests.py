@@ -5,7 +5,7 @@ import random
 
 from attrdict import AttrDict
 from time import time
-from envs.vec_env import make_vec_env, make_env
+from envs.cpu.vec_env import make_vec_env, make_env
 from utils.utils import log
 from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared, VectorizedLinearBlock
 from models.actor_critic import ActorCriticShared, QDActorCriticShared, Agent
