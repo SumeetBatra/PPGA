@@ -8,8 +8,8 @@ import wandb
 from collections import deque
 from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
 from utils.utils import log, save_checkpoint
-from models.vectorized import QDVectorizedActorCriticShared
-from models.actor_critic import QDActorCriticShared
+from models.vectorized import VectorizedActorCriticShared
+from models.actor_critic import ActorCriticShared
 
 
 # based off of the clean-rl implementation
@@ -23,30 +23,31 @@ class PPO:
         self.obs_shape = self.vec_env.single_observation_space.shape
         self.action_shape = self.vec_env.single_action_space.shape
         # TODO: testing multi-agent QDRL multi-objective learning
-        agent1 = QDActorCriticShared(cfg, self.obs_shape, self.action_shape, cfg.num_dims).to(self.device)
+        agent1 = ActorCriticShared(cfg, self.obs_shape, self.action_shape).to(self.device)
         agent1.measure_coeffs = torch.ones(cfg.num_dims) * -1.0
         self._agents = [agent1]
-        self.vec_inference = QDVectorizedActorCriticShared(cfg, self._agents, QDActorCriticShared, cfg.num_dims,
-                                                           obs_shape=self.obs_shape, action_shape=self.action_shape).to(
+        self.vec_inference = VectorizedActorCriticShared(cfg, self._agents, ActorCriticShared,
+                                                         obs_shape=self.obs_shape, action_shape=self.action_shape).to(
             self.device)
-        self.optimizers = [torch.optim.Adam(agent.parameters(), lr=cfg.learning_rate, eps=1e-5) for agent in self._agents]
+        self.optimizers = [torch.optim.Adam(agent.parameters(), lr=cfg.learning_rate, eps=1e-5) for agent in
+                           self._agents]
         self.cfg = cfg
 
-        # # single policy eval env
-        # single_eval_cfg = copy.deepcopy(cfg)
-        # single_eval_cfg.num_workers = 4
-        # single_eval_cfg.envs_per_worker = 1
-        # single_eval_cfg.envs_per_model = 4
-        # self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
-        #                                              envs_per_worker=single_eval_cfg.envs_per_worker)
-        #
-        # # multi-policy eval
-        # multi_eval_cfg = copy.deepcopy(cfg)
-        # multi_eval_cfg.num_workers = cfg.mega_lambda
-        # multi_eval_cfg.envs_per_worker = 4
-        # multi_eval_cfg.envs_per_model = 4
-        # self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
-        #                                             envs_per_worker=multi_eval_cfg.envs_per_worker)
+        # single policy eval env
+        single_eval_cfg = copy.deepcopy(cfg)
+        single_eval_cfg.num_workers = 4
+        single_eval_cfg.envs_per_worker = 1
+        single_eval_cfg.envs_per_model = 4
+        self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
+                                                     envs_per_worker=single_eval_cfg.envs_per_worker)
+
+        # multi-policy eval
+        multi_eval_cfg = copy.deepcopy(cfg)
+        multi_eval_cfg.num_workers = cfg.mega_lambda
+        multi_eval_cfg.envs_per_worker = 4
+        multi_eval_cfg.envs_per_model = 4
+        self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
+                                                    envs_per_worker=multi_eval_cfg.envs_per_worker)
 
         # metrics for logging
         self.metric_last_n_window = 10
@@ -54,6 +55,7 @@ class PPO:
         self.episodic_returns.append(0)
         self._report_interval = 5.0  # report returns every 5 seconds
         self._last_interval = 0.0
+        self.total_rewards = torch.zeros(self.vec_env.num_envs)
 
         # seeding
         random.seed(seed)
@@ -86,9 +88,9 @@ class PPO:
     @agents.setter
     def agents(self, agents):
         self._agents = agents
-        self.vec_inference = QDVectorizedActorCriticShared(self.cfg, self._agents, QDActorCriticShared,
-                                                           self.cfg.num_dims, obs_shape=self.vec_env.obs_shape,
-                                                           action_shape=self.vec_env.action_space.shape)
+        self.vec_inference = VectorizedActorCriticShared(self.cfg, self._agents, ActorCriticShared,
+                                                         obs_shape=self.vec_env.obs_shape,
+                                                         action_shape=self.vec_env.action_space.shape)
 
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, measure_reward=False):
         # bootstrap value if not done
@@ -129,7 +131,7 @@ class PPO:
                 mb_inds = b_inds[start:end]
 
                 _, newlogprob, entropy = self._agents[i].get_action(b_obs[mb_inds],
-                                                                   b_actions[mb_inds])
+                                                                    b_actions[mb_inds])
                 newvalue = self._agents[i].get_value(b_obs[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
@@ -204,14 +206,15 @@ class PPO:
                     action, logprob, _ = self.vec_inference.get_action(self.next_obs)
                     value = self.vec_inference.get_value(self.next_obs)
                     self.values[step] = value.flatten()
-                    if self.cfg.algorithm == 'qd-ppo':
-                        measure_values = self.vec_inference.get_measure_values(self.next_obs)
-                        self.measure_values[step] = measure_values
+                    # if self.cfg.algorithm == 'qd-ppo':
+                    #     measure_values = self.vec_inference.get_measure_values(self.next_obs)
+                    #     self.measure_values[step] = measure_values
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
                 self.next_obs, reward, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
                 reward = reward.cpu()
+                self.total_rewards += reward
                 self.next_obs = self.next_obs.to(self.device)
                 if self.cfg.normalize_rewards:
                     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
@@ -229,11 +232,13 @@ class PPO:
 
                 for i, done in enumerate(self.next_done.flatten()):
                     if done:
-                        total_reward = -infos['total_reward'][i]  # TODO: why is reward negative when using brax??
+                        total_reward = self.total_rewards[i].clone()
                         log.debug(f'{total_reward=}')
-                        self.episodic_returns.append(-infos['total_reward'][i])
+                        self.episodic_returns.append(total_reward)
+                        self.total_rewards[i] = 0
 
-            advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values, self.dones,
+            advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
+                                                         self.dones,
                                                          rollout_length=self.cfg.rollout_length)
             # flatten the batch
             b_obs = self.obs.reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
@@ -252,10 +257,9 @@ class PPO:
 
             # update vec inference
             # TODO: create an update_params() method instead of recreating vec_inf each time
-            self.vec_inference = QDVectorizedActorCriticShared(self.cfg, self._agents, QDActorCriticShared,
-                                                               measure_dims=self.cfg.num_dims,
-                                                               obs_shape=self.obs_shape,
-                                                               action_shape=self.action_shape)
+            self.vec_inference = VectorizedActorCriticShared(self.cfg, self._agents, ActorCriticShared,
+                                                             obs_shape=self.obs_shape,
+                                                             action_shape=self.action_shape)
 
             #########################
             ### TESTING #############
@@ -308,8 +312,8 @@ class PPO:
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):
-                save_checkpoint('checkpoints', f'model_{i}_checkpoint', trained_models[i], self.optimizers[i])
-            self.vec_env.stop.emit()
+                save_checkpoint('checkpoints', f'brax_model_{i}_checkpoint', self._agents[i], self.optimizers[i])
+            # self.vec_env.stop.emit()
             log.debug("Done!")
         else:
             m_grads = np.concatenate(m_grads, axis=0).reshape(self.cfg.num_dims, -1)
@@ -326,7 +330,7 @@ class PPO:
         :returns: Sum rewards and measures for all agents
         '''
 
-        total_reward = np.zeros((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
+        total_reward = np.zeros(vec_env.num_envs)
 
         obs = vec_env.reset()
         obs = obs.to(self.device)
@@ -336,30 +340,30 @@ class PPO:
             obs_mean = self.vec_inference.obs_normalizer.obs_rms.mean.to(self.device)
             obs_var = self.vec_inference.obs_normalizer.obs_rms.var.to(self.device)
 
-        for _ in range(1000):
+        while not torch.all(dones):
             with torch.no_grad():
                 if self.cfg.normalize_obs:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
-                acts = acts.unsqueeze(1)
-                obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy(),
-                                                           autoreset=True)  # TODO: I think we should not be autoresetting here??
+                obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy())
                 obs = obs.to(self.device)
-                total_reward += rew.detach().cpu().numpy().reshape(vec_agent.num_models, -1)
-                dones = torch.logical_or(dones, next_dones)
+                total_reward += rew.detach().cpu().numpy() * ~dones.cpu().numpy()
+                dones = torch.logical_or(dones, next_dones.cpu())
 
         # get the final measures stored in the infos from the final timestep
-        measures = infos['bc'].detach().cpu().numpy()
-        measures = np.zeros_like(measures).reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models,
-                                                   -1).mean(axis=1)
+        # measures = infos['bc'].detach().cpu().numpy()
+        measures = np.zeros((vec_env.num_envs, 4)).reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(axis=1)
 
+        max_reward = np.max(total_reward)
+        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
         total_reward = total_reward.mean(axis=1)
 
-        traj_lengths = infos['traj_length']
+        # traj_lengths = infos['traj_length']
 
         log.debug('Finished Evaluation Step')
         log.info(f'BC on eval: {measures}')
         log.info(f'Rewards on eval: {total_reward}')
+        log.info(f'Max Reward on eval: {max_reward}')
         # log.info(f'{traj_lengths=}')
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)

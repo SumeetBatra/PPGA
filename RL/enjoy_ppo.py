@@ -19,9 +19,9 @@ def enjoy():
     env = make_env('QDAntBulletEnv-v0', seed=0, gamma=0.99)()
     env.render()
     obs_shape, action_shape = env.observation_space.shape, env.action_space.shape
-    cp_path = "checkpoints/model_0_checkpoint"
+    cp_path = "checkpoints/brax_model_0_checkpoint"
     model_state_dict = torch.load(cp_path)['model_state_dict']
-    cfg = {'num_workers': 1, 'envs_per_worker': 1, 'normalize_obs': False, 'normalize_rewards': False, 'num_dims': 4, 'envs_per_model': 1}
+    cfg = {'num_workers': 1, 'envs_per_worker': 1, 'normalize_obs': False, 'normalize_rewards': True, 'num_dims': 4, 'envs_per_model': 1}
     cfg = AttrDict(cfg)
     agent = QDActorCriticShared(cfg, obs_shape, action_shape, 4).to(device)
     # agent = QDVectorizedActorCriticShared(cfg, [agent], QDActorCriticShared, measure_dims=4)
@@ -88,4 +88,4 @@ def enjoy_brax():
 
 
 if __name__ == '__main__':
-    enjoy_brax()
+    enjoy()

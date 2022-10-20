@@ -11,10 +11,11 @@ from utils.normalize_obs import NormalizeReward, NormalizeObservation
 class StochasticPolicy(ABC, nn.Module):
     def __init__(self, cfg):
         super().__init__()
+        self.cfg = cfg
         self.layers: nn.Sequential
 
         if cfg.normalize_obs:
-            self.obs_normalizer = NormalizeObservation((28,))  # TODO: fix this
+            self.obs_normalizer = NormalizeObservation(cfg.obs_dim)
         if cfg.normalize_rewards:
             self.reward_normalizer = NormalizeReward(cfg.envs_per_model)
 

@@ -5,7 +5,6 @@ import brax
 from envs import brax_custom
 from brax.envs import to_torch
 from jax.dlpack import to_dlpack
-from envs.wrappers.reward import ForwardReward, TotalReward, QDReward, QDRLReward
 
 import torch
 v = torch.ones(1, device='cuda')  # init torch cuda before jax
@@ -26,6 +25,5 @@ def make_vec_env_brax(cfg):
     vec_env = gym.wrappers.ClipAction(vec_env)
     vec_env = gym.wrappers.TransformObservation(vec_env, lambda obs: torch.clip(obs, -10, 10))
     vec_env = gym.wrappers.TransformReward(vec_env, lambda reward: torch.clip(reward, -10, 10))
-    vec_env = TotalReward(vec_env)
 
     return vec_env

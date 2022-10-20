@@ -1,5 +1,7 @@
 import argparse
 import sys
+import numpy as np
+
 from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utils import config_wandb
@@ -86,6 +88,8 @@ if __name__ == '__main__':
         raise NotImplementedError(f'{cfg.env_type} is undefined for "env_type"')
 
     cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
+    cfg.obs_shape = vec_env.single_observation_space.shape
+    cfg.action_dim = vec_env.single_action_space.shape
 
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
