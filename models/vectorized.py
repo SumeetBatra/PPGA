@@ -40,7 +40,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
         self.num_models = len(models)
         self.model_fn = model_fn
         self.blocks: List[VectorizedLinearBlock]
-        self.layers: nn.Sequential
+        self.actor_mean: nn.Sequential
         self.actor_logstd: nn.Parameter
         self.kwargs = kwargs
 
@@ -74,18 +74,18 @@ class VectorizedPolicy(StochasticPolicy, ABC):
                 blocks.append(nonlinear)
         return blocks
 
-    def models_list(self):
+    def vec_to_models(self):
         '''
         Returns a list of models view of the object
         '''
-        models = [self.model_fn(**self.kwargs) for _ in range(self.num_models)]
+        models = [self.model_fn(cfg=self.cfg, **self.kwargs) for _ in range(self.num_models)]
         for i, model in enumerate(models):
-            for l, layer in enumerate(self.layers):
+            for l, layer in enumerate(self.actor_mean):
                 # layer could be a nonlinearity
                 if not isinstance(layer, VectorizedLinearBlock):
                     continue
-                model.layers[l].weight.data = layer.weight.data[i]
-                model.layers[l].bias.data = layer.bias.data[i]
+                model.actor_mean[l].weight.data = layer.weight.data[i]
+                model.actor_mean[l].bias.data = layer.bias.data[i]
 
                 # update obs/rew normalizers
                 if self.cfg.normalize_obs:
@@ -94,7 +94,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
                     model.reward_normalizer = self.rew_normalizers[i]
 
                 # update action logprobs
-                model.actor_logstd.data = self._actor_logstd[i]
+                model.actor_logstd.data = self.actor_logstd[i]
 
     @abstractmethod
     def forward(self, x):

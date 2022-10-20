@@ -38,7 +38,7 @@ log.addHandler(fh)
 
 def config_wandb(**kwargs):
     # wandb initialization
-    wandb.init(project='QDPPO', entity='sumeetb', name=kwargs['run_name'])
+    wandb.init(project='QDPPO', entity='sumeetb', group=kwargs['wandb_group'], name=kwargs['run_name'])
     cfg = {}
     for key, val in kwargs.items():
         cfg[key] = val

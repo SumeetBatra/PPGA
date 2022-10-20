@@ -22,8 +22,8 @@ def make_vec_env_brax(cfg):
     vec_env = gym.make(_to_brax_env_name[cfg.env_name], batch_size=cfg.env_batch_size, seed=cfg.seed)
     vec_env = to_torch.JaxToTorchWrapper(vec_env, device='cuda')
 
-    vec_env = gym.wrappers.ClipAction(vec_env)
-    vec_env = gym.wrappers.TransformObservation(vec_env, lambda obs: torch.clip(obs, -10, 10))
-    vec_env = gym.wrappers.TransformReward(vec_env, lambda reward: torch.clip(reward, -10, 10))
+    # vec_env = gym.wrappers.ClipAction(vec_env)
+    # vec_env = gym.wrappers.TransformObservation(vec_env, lambda obs: torch.clip(obs, -10, 10))
+    # vec_env = gym.wrappers.TransformReward(vec_env, lambda reward: torch.clip(reward, -10, 10))
 
     return vec_env

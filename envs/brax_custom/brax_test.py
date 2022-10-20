@@ -6,29 +6,16 @@ import gym
 
 import brax
 
-from brax import envs
-from brax import jumpy as jp
+from attrdict import AttrDict
+from envs import brax_custom
 from brax.envs import to_torch
-from brax.io import html
-from brax.io import image
-import jax
-from jax import numpy as jnp
 from jax.dlpack import to_dlpack
+from envs.brax_custom.gpu_env import make_vec_env_brax
 import torch
 v = torch.ones(1, device='cuda')  # init torch cuda before jax
 
 
-def brax_test():
-    entry_point = functools.partial(envs.create_gym_env, env_name='ant')
-    if 'brax_custom-ant-v0' not in gym.envs.registry.env_specs:
-        gym.register('brax_custom-ant-v0', entry_point=entry_point)
-
-    # create a gym environment that contains 4096 parallel ant environments
-    gym_env = gym.make("brax_custom-ant-v0", batch_size=1)
-
-    # wrap it to interoperate with torch data structures
-    gym_env = to_torch.JaxToTorchWrapper(gym_env, device='cuda')
-
+def brax_test(gym_env):
     # jit compile env.reset
     obs = gym_env.reset()
 
@@ -38,32 +25,25 @@ def brax_test():
 
     before = time.time()
 
-    for _ in range(1000):
+    steps = 1000
+    for _ in range(steps):
         action = torch.rand(gym_env.action_space.shape, device='cuda') * 2 - 1
         obs, rewards, done, info = gym_env.step(action)
 
     duration = time.time() - before
-    print(f'time for {409600} steps: {duration:.2f}s ({int(409600 / duration)} steps/sec)')
-
-    before = time.time()
-
-    for _ in range(100):
-        action = torch.rand(gym_env.action_space.shape, device='cuda') * 2 - 1
-        obs, rewards, done, info = gym_env.step(action)
-
-    duration = time.time() - before
-    print(f'time for {409600} steps: {duration:.2f}s ({int(409600 / duration)} steps/sec)')
+    env_steps = gym_env.num_envs * steps
+    print(f'time for {env_steps} steps: {duration:.2f}s ({int(env_steps / duration)} steps/sec)')
 
 
-def create_qdbrax_gym():
-    env = brax.envs._envs['ant'](legacy_spring=True)
-
-    env = brax.envs.wrappers.EpisodeWrapper(env, 1000, 1)
-    env = brax.envs.wrappers.VectorWrapper(env, batch_size=4096)
-    env = brax.envs.wrappers.AutoResetWrapper(env)
-    env = to_torch.JaxToTorchWrapper(env, device='cuda')
-    return env
+def two_brax_gyms():
+    cfg = {'env_name': 'ant', 'seed': 0, 'env_batch_size': 4096}
+    cfg = AttrDict(cfg)
+    env1 = make_vec_env_brax(cfg)
+    env2 = make_vec_env_brax(cfg)
+    print('successfully spawned 2 brax env instances!')
+    brax_test(env1)
+    brax_test(env2)
 
 
 if __name__ == '__main__':
-    brax_test()
+    two_brax_gyms()

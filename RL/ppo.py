@@ -7,6 +7,7 @@ import torch.nn as nn
 import wandb
 from collections import deque
 from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
+from envs.brax_custom.gpu_env import make_vec_env_brax
 from utils.utils import log, save_checkpoint
 from models.vectorized import VectorizedActor
 from models.actor_critic import Actor, Critic
@@ -34,23 +35,30 @@ class PPO:
         self.critic_optimizer = torch.optim.Adam(self._critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
-        # single policy eval env
-        single_eval_cfg = copy.deepcopy(cfg)
-        single_eval_cfg.num_workers = 4
-        single_eval_cfg.envs_per_worker = 1
-        single_eval_cfg.envs_per_model = 4
-        self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
-                                                     envs_per_worker=single_eval_cfg.envs_per_worker)
+        # # single policy eval env
+        # single_eval_cfg = copy.deepcopy(cfg)
+        # single_eval_cfg.num_workers = 4
+        # single_eval_cfg.envs_per_worker = 1
+        # single_eval_cfg.envs_per_model = 4
+        # self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
+        #                                              envs_per_worker=single_eval_cfg.envs_per_worker)
+        #
 
         # multi-policy eval
-        multi_eval_cfg = copy.deepcopy(cfg)
-        multi_eval_cfg.num_workers = cfg.mega_lambda
-        multi_eval_cfg.envs_per_worker = 4
-        multi_eval_cfg.envs_per_model = 4
-        self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
-                                                    envs_per_worker=multi_eval_cfg.envs_per_worker)
+        if cfg.env_type == 'cpu':
+            multi_eval_cfg = copy.deepcopy(cfg)
+            multi_eval_cfg.num_workers = cfg.mega_lambda
+            multi_eval_cfg.envs_per_worker = 4
+            multi_eval_cfg.envs_per_model = 4
+            self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
+                                                        envs_per_worker=multi_eval_cfg.envs_per_worker)
+        else:
+            # brax env
+            multi_eval_cfg = copy.deepcopy(cfg)
+            multi_eval_cfg.env_batch_size = 1024
+            self.multi_eval_env = make_vec_env_brax(cfg)
 
-        # metrics for logging
+            # metrics for logging
         self.metric_last_n_window = 10
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
         self.episodic_returns.append(0)
@@ -90,8 +98,8 @@ class PPO:
     def agents(self, agents):
         self._agents = agents
         self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
-                                             obs_shape=self.vec_env.obs_shape,
-                                             action_shape=self.vec_env.action_space.shape)
+                                             obs_shape=self.obs_shape,
+                                             action_shape=self.action_shape)
         self.actor_optimizers = [torch.optim.Adam(agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5) for agent in
                                  self._agents]
 
@@ -239,7 +247,7 @@ class PPO:
                 for i, done in enumerate(self.next_done.flatten()):
                     if done:
                         total_reward = self.total_rewards[i].clone()
-                        log.debug(f'{total_reward=}')
+                        # log.debug(f'{total_reward=}')
                         self.episodic_returns.append(total_reward)
                         self.total_rewards[i] = 0
 
@@ -323,7 +331,7 @@ class PPO:
             log.debug("Done!")
         else:
             m_grads = np.concatenate(m_grads, axis=0).reshape(self.cfg.num_dims, -1)
-            f, m = self.evaluate(self.vec_inference, self.single_eval_env)
+            f, m = self.evaluate(self.vec_inference, self.multi_eval_env)
             return f.reshape(self.vec_inference.num_models, ), \
                    obj_grad.reshape(self.vec_inference.num_models, -1), \
                    m.reshape(self.vec_inference.num_models, -1), \

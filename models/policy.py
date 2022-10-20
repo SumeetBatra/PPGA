@@ -15,7 +15,7 @@ class StochasticPolicy(ABC, nn.Module):
         self.layers: nn.Sequential
 
         if cfg.normalize_obs:
-            self.obs_normalizer = NormalizeObservation(cfg.obs_dim)
+            self.obs_normalizer = NormalizeObservation(cfg.obs_shape)
         if cfg.normalize_rewards:
             self.reward_normalizer = NormalizeReward(cfg.envs_per_model)
 

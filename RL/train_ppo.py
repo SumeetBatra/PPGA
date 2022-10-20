@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--use_wandb", default=False, type=lambda x: bool(strtobool(x)),
                         help='Use weights and biases to track the exp')
     parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
+    parser.add_argument('--wandb_group', type=str)
 
     # algorithm args
     parser.add_argument('--total_timesteps', type=int, default=1000000)
@@ -65,6 +66,7 @@ def parse_args():
                                                                     " CMA-ES instances exploring the archive")
     parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
     parser.add_argument("--mega_lambda", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
+    parser.add_argument('--dqd_lr', type=float, default=0.001, help='Learning rate on gradient arborescence in DQD. Used in cma-mega, cma-maega, etc')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -89,7 +91,7 @@ if __name__ == '__main__':
 
     cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
     cfg.obs_shape = vec_env.single_observation_space.shape
-    cfg.action_dim = vec_env.single_action_space.shape
+    cfg.action_shape = vec_env.single_action_space.shape
 
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
