@@ -92,6 +92,8 @@ class PPO:
         self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
                                              obs_shape=self.vec_env.obs_shape,
                                              action_shape=self.vec_env.action_space.shape)
+        self.actor_optimizers = [torch.optim.Adam(agent.parameters(), lr=self.cfg.learning_rate, eps=1e-5) for agent in
+                                 self._agents]
 
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, measure_reward=False):
         # bootstrap value if not done
@@ -189,7 +191,7 @@ class PPO:
 
         num_agents = len(self._agents)
 
-        original_params = copy.deepcopy(self.vec_inference.serialize())
+        original_params = copy.deepcopy(self._agents[0].serialize())  # TODO: make this work with many agents
 
         for update in range(1, num_updates + 1):
             # learning rate annealing
@@ -257,7 +259,7 @@ class PPO:
                     b_values[i], (b_obs[i], b_logprobs[i], b_actions[i], b_advantages[i], b_returns[i]),
                     self.actor_optimizers[i], i)
                 if self.cfg.algorithm == 'qd-ppo':
-                    obj_grad = self.vec_inference.serialize() - original_params
+                    obj_grad = self._agents[0].serialize() - original_params
 
             # update vec inference
             # TODO: create an update_params() method instead of recreating vec_inf each time
