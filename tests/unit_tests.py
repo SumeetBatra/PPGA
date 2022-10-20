@@ -7,11 +7,11 @@ from attrdict import AttrDict
 from time import time
 from envs.cpu.vec_env import make_vec_env, make_env
 from utils.utils import log
-from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, QDVectorizedActorCriticShared, VectorizedLinearBlock
-from models.actor_critic import ActorCriticShared, QDActorCriticShared, Agent
+from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, VectorizedLinearBlock, VectorizedActor
+from models.actor_critic import ActorCriticShared, QDActorCriticShared, Actor
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
-            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0})
+            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0, 'obs_dim': 28})
 
 
 def test_vec_env():
@@ -100,8 +100,8 @@ def test_vectorized_policy():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     obs_shape, action_shape = dummy_env.observation_space.shape, dummy_env.action_space.shape
     num_models = 10
-    models = [ActorCriticShared(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
-    vec_model = VectorizedActorCriticShared(TEST_CFG, models, ActorCriticShared).to(device)
+    models = [Actor(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
+    vec_model = VectorizedActor(TEST_CFG, models, Actor).to(device)
     obs = torch.randn((num_models, *obs_shape)).to(device)
 
     # test same number of models as number of obs
@@ -126,8 +126,8 @@ def test_vectorized_policy():
     num_models = 7
     num_obs = num_models * 3
 
-    models = [QDActorCriticShared(TEST_CFG, obs_shape, action_shape, TEST_CFG.num_dims).to(device) for _ in range(num_models)]
-    vec_model = QDVectorizedActorCriticShared(TEST_CFG, models, ActorCriticShared, TEST_CFG.num_dims).to(device)
+    models = [Actor(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
+    vec_model = VectorizedActor(TEST_CFG, models, Actor).to(device)
     obs = torch.randn((num_obs, *obs_shape)).to(device)
 
     with torch.no_grad():

@@ -11,34 +11,6 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-class Agent(nn.Module):
-    def __init__(self, obs_shape, action_shape: np.ndarray):
-        super().__init__()
-
-        self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(action_shape)), std=0.01),
-        )
-
-        self._actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
-
-    def forward(self, x):
-        return self.actor_mean(x)
-
-    def get_action(self, obs, action=None):
-        action_mean = self.actor_mean(obs)
-        action_logstd = self._actor_logstd.expand_as(action_mean)
-        action_std = torch.exp(action_logstd)
-        cov_mat = torch.diag_embed(action_std)
-        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
-        if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
-
-
 class ActorCriticSeparate(StochasticPolicy):
     def __init__(self, obs_shape, action_shape: np.ndarray, **kwargs):
         super().__init__(normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
@@ -158,10 +130,37 @@ class LinearPolicy(nn.Module):
         self.actor.weight.data = weights
 
 
-class GlobalCritic(nn.Module):
+class Actor(StochasticPolicy):
+    def __init__(self, cfg, obs_shape, action_shape: np.ndarray):
+        super().__init__(cfg)
+
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, np.prod(action_shape)), std=0.01),
+        )
+
+        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
+
+    def forward(self, x):
+        return self.actor_mean(x)
+
+    def get_action(self, obs, action=None):
+        action_mean = self.actor_mean(obs)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        cov_mat = torch.diag_embed(action_std)
+        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy()
+
+
+class Critic(nn.Module):
     def __init__(self, obs_shape):
         super().__init__()
-        self.m_dim = 2  # dimensionality of the measures
         self.critic = nn.Sequential(
             # layer_init(nn.Linear(np.array(obs_shape).prod() + self.m_dim, 64)),
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
