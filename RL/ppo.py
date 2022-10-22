@@ -3,6 +3,7 @@ import random
 import copy
 
 import torch
+import time
 import torch.nn as nn
 import wandb
 from collections import deque
@@ -10,7 +11,7 @@ from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
 from envs.brax_custom.gpu_env import make_vec_env_brax
 from utils.utils import log, save_checkpoint
 from models.vectorized import VectorizedActor
-from models.actor_critic import Actor, Critic
+from models.actor_critic import Actor, Critic, QDCritic
 
 
 # based off of the clean-rl implementation
@@ -26,7 +27,7 @@ class PPO:
 
         agent = Actor(cfg, self.obs_shape, self.action_shape).to(self.device)
         self._agents = [agent]
-        critic = Critic(self.obs_shape).to(self.device)
+        critic = QDCritic(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
         self._critic = critic
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
@@ -84,7 +85,7 @@ class PPO:
         self.dones = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
-        self.measure_values = torch.zeros_like(self.measures).to(self.device)
+        self.measure_values = torch.zeros_like(self.values).to(self.device)
 
         next_obs = self.vec_env.reset()
         self.next_obs = next_obs.to(self.device)
@@ -107,8 +108,21 @@ class PPO:
         # bootstrap value if not done
         with torch.no_grad():
             if measure_reward:
-                next_value = self.vec_inference.get_measure_values(next_obs).reshape(1, self.cfg.num_envs, -1).to(
-                    self.device)
+                # create the measure mask
+                m_mask = torch.zeros(self.cfg.num_dims, self.vec_env.num_envs // self.cfg.num_dims, self.cfg.num_dims)
+                for i in range(self.cfg.num_dims):
+                    m_mask[i, :, i] = 1.0  # there are (num_dim) agents, each one maximizing one of the measures, so we mask out the measures that they aren't maximizing
+                rewards = (rewards * m_mask.reshape(1, self.vec_env.num_envs, -1).to(self.device)).sum(dim=2)
+
+                obs_per_measure = next_obs.reshape(self.cfg.num_dims, self.vec_env.num_envs // self.cfg.num_dims, -1)
+                measure_vals = []
+                # TODO: can this be vectorized?
+                for i, obs in enumerate(obs_per_measure):
+                    measure_value = self._critic.get_measure_value(obs, dim=i)
+                    measure_vals.append(measure_value)
+                measure_vals = torch.cat(measure_vals)
+                next_value = measure_vals.to(self.device).reshape(1, -1)
+
             else:
                 next_value = self._critic.get_value(next_obs).reshape(1, -1).to(self.device)
             # assume we use gae
@@ -134,11 +148,16 @@ class PPO:
     def update(self, values, batched_data, actor_optimizer, i):
         b_values = values.reshape(-1)
         (b_obs, b_logprobs, b_actions, b_advantages, b_returns) = batched_data
-        b_inds = torch.arange(self.cfg.batch_size)
+
+        # if there are many networks training in parallel, then these sizes will be different then the ones stored in the cfg. This primarily occurs in QD-PPO and not standard PPO
+        batch_size = b_obs.shape[0]
+        minibatch_size = batch_size // self.cfg.num_minibatches
+
+        b_inds = torch.arange(batch_size)
         clipfracs = []
         for epoch in range(self.cfg.update_epochs):
-            for start in range(0, self.cfg.batch_size, self.cfg.minibatch_size):
-                end = start + self.cfg.minibatch_size
+            for start in range(0, batch_size, minibatch_size):
+                end = start + minibatch_size
                 mb_inds = b_inds[start:end]
 
                 _, newlogprob, entropy = self._agents[i].get_action(b_obs[mb_inds],
@@ -194,6 +213,85 @@ class PPO:
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
+    def get_measure_grads(self, num_updates, rollout_length):
+        global_step = 0
+        original_params = copy.deepcopy(self._agents[0].serialize())
+        agent_params = [copy.deepcopy(self._agents[0]).serialize() for _ in range(self.cfg.num_dims)]
+        agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(agent_params[i]).to(self.device) for i in range(self.cfg.num_dims)]
+        num_agents = len(agents)  # this is essentially the number of measures
+        self.agents = agents  # this also updates the optimizers and vec_inference
+
+        start = time.time()
+        for update in range(1, num_updates + 1):
+            for step in range(rollout_length):
+                global_step += self.vec_env.num_envs
+                if self.cfg.normalize_obs:
+                    self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
+                self.obs[step] = self.next_obs
+                self.dones[step] = self.next_done.view(-1)
+
+                with torch.no_grad():
+                    action, logprob, _ = self.vec_inference.get_action(self.next_obs)
+                    obs_per_measure = self.next_obs.reshape(num_agents, self.vec_env.num_envs // num_agents, -1)
+                    measure_vals = []
+                    # TODO: can this be vectorized?
+                    for i, obs in enumerate(obs_per_measure):
+                        measure_value = self._critic.get_measure_value(obs, dim=i)
+                        measure_vals.append(measure_value)
+                    measure_vals = torch.cat(measure_vals)
+                    self.measure_values[step] = measure_vals
+
+                self.actions[step] = action
+                self.logprobs[step] = logprob
+
+                self.next_obs, _, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
+                measures = infos['measures']
+                self.measures[step] = measures
+
+            # finished the rollout, now we will calculate advantages for the measures
+            advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.measures,
+                                                         self.measure_values, self.dones,
+                                                         rollout_length=self.cfg.rollout_length, measure_reward=True)
+
+            # use the data to get m_grads and update the respective policies
+
+            # flatten the batch
+            b_obs = self.obs.reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
+            b_logprobs = self.logprobs.reshape(num_agents, -1)
+            b_actions = self.actions.reshape((num_agents, -1,) + self.vec_env.single_action_space.shape)
+            b_advantages = advantages.reshape(num_agents, -1)
+            b_returns = returns.reshape(num_agents, -1)
+            b_values = self.values.reshape(num_agents, -1)
+
+            for i in range(self.vec_inference.num_models):
+                (pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
+                    b_values[i], (b_obs[i], b_logprobs[i], b_actions[i], b_advantages[i], b_returns[i]),
+                    self.actor_optimizers[i], i)
+
+            # update vec inference
+            # TODO: create an update_params() method instead of recreating vec_inf each time
+            self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
+                                                 obs_shape=self.obs_shape,
+                                                 action_shape=self.action_shape)
+
+            if self.cfg.use_wandb:
+                wandb.log({
+                    "QDLosses/measures_value_loss": v_loss.item(),
+                    "QDLosses/measures_policy_loss": pg_loss.item(),
+                    "QDLosses/measures_old_approx_kl": old_approx_kl.item(),
+                    "QDLosses/measures_approx_kl": approx_kl.item(),
+                    "QDLosses/measures_clipfrac": np.mean(clipfracs)
+                })
+
+            log.debug(f'Finished PPO iteration {update} for measures')
+
+        m_grads = np.array([self._agents[i].serialize() - original_params for i in range(num_agents)])
+        m_grads = m_grads.reshape(1, self.cfg.num_dims, -1)  # TODO: fix this
+        elapsed = time.time() - start
+        log.debug(f'Calculating measure grads took {elapsed:.2f} seconds to complete')
+
+        return m_grads
+
     def train(self, num_updates, rollout_length):
         global_step = 0
 
@@ -201,14 +299,8 @@ class PPO:
 
         original_params = copy.deepcopy(self._agents[0].serialize())  # TODO: make this work with many agents
 
+        train_start = time.time()
         for update in range(1, num_updates + 1):
-            # learning rate annealing
-            # TODO: not sure if we should keep this
-            # if self.cfg.anneal_lr:
-            #     frac = 1.0 - (update - 1.0) / num_updates
-            #     lrnow = frac * self.cfg.learning_rate
-            #     optimizer.param_groups[0]["lr"] = lrnow
-
             for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
                 if self.cfg.normalize_obs:
@@ -266,8 +358,6 @@ class PPO:
                 (pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
                     b_values[i], (b_obs[i], b_logprobs[i], b_actions[i], b_advantages[i], b_returns[i]),
                     self.actor_optimizers[i], i)
-                if self.cfg.algorithm == 'qd-ppo':
-                    obj_grad = self._agents[0].serialize() - original_params
 
             # update vec inference
             # TODO: create an update_params() method instead of recreating vec_inf each time
@@ -322,6 +412,8 @@ class PPO:
             if self.cfg.algorithm == 'qd-ppo':
                 log.debug(f"Finished PPO iteration {update}")
 
+        train_elapse = time.time() - train_start
+        log.debug(f'train() took {train_elapse:.2f} seconds to complete')
         if self.cfg.algorithm == 'ppo':
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
@@ -330,12 +422,12 @@ class PPO:
             # self.vec_env.stop.emit()
             log.debug("Done!")
         else:
-            m_grads = np.concatenate(m_grads, axis=0).reshape(self.cfg.num_dims, -1)
+            obj_grad = self._agents[0].serialize() - original_params
             f, m = self.evaluate(self.vec_inference, self.multi_eval_env)
             return f.reshape(self.vec_inference.num_models, ), \
                    obj_grad.reshape(self.vec_inference.num_models, -1), \
                    m.reshape(self.vec_inference.num_models, -1), \
-                   m_grads.reshape(self.vec_inference.num_models, self.cfg.num_dims, -1)
+
 
     def evaluate(self, vec_agent, vec_env):
         '''
@@ -345,6 +437,8 @@ class PPO:
         '''
 
         total_reward = np.zeros(vec_env.num_envs)
+        measures = torch.zeros(vec_env.num_envs, self.cfg.num_dims).to(self.device)
+        traj_length = 0
 
         obs = vec_env.reset()
         obs = obs.to(self.device)
@@ -360,14 +454,15 @@ class PPO:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
                 obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy())
+                traj_length += 1
+                measures += infos['measures']  # TODO: should this be truncated?
                 obs = obs.to(self.device)
                 total_reward += rew.detach().cpu().numpy() * ~dones.cpu().numpy()
                 dones = torch.logical_or(dones, next_dones.cpu())
 
-        # get the final measures stored in the infos from the final timestep
-        # measures = infos['bc'].detach().cpu().numpy()
-        measures = np.zeros((vec_env.num_envs, 4)).reshape(vec_agent.num_models,
-                                                           vec_env.num_envs // vec_agent.num_models, -1).mean(axis=1)
+        # get the final measures
+        measures = measures / traj_length
+        measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
 
         max_reward = np.max(total_reward)
         total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
@@ -381,4 +476,4 @@ class PPO:
         log.info(f'Max Reward on eval: {max_reward}')
         # log.info(f'{traj_lengths=}')
 
-        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims)
+        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims).detach().cpu().numpy()

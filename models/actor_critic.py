@@ -161,15 +161,29 @@ class Actor(StochasticPolicy):
 class Critic(nn.Module):
     def __init__(self, obs_shape):
         super().__init__()
-        self.critic = nn.Sequential(
-            # layer_init(nn.Linear(np.array(obs_shape).prod() + self.m_dim, 64)),
+        self.core = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
             nn.Tanh(),
             layer_init(nn.Linear(64, 64)),
             nn.Tanh(),
+        )
+        self.critic = nn.Sequential(
             layer_init(nn.Linear(64, 1), std=1.0),
         )
 
     def get_value(self, obs):
-        return self.critic(obs)
+        core_out = self.core(obs)
+        return self.critic(core_out)
+
+
+class QDCritic(Critic):
+    def __init__(self, obs_shape, measure_dim):
+        Critic.__init__(self, obs_shape)
+        self.measure_critics = nn.Sequential(
+            layer_init(nn.Linear(64, measure_dim), std=1.0),
+        )
+
+    def get_measure_value(self, obs, dim):
+        core_out = self.core(obs)
+        return self.measure_critics(core_out)[:, dim]
 

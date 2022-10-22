@@ -121,14 +121,14 @@ class FeetContactWrapper(QDEnv):
 
     def reset(self, rng: jp.ndarray) -> State:
         state = self.env.reset(rng)
-        state.info["state_descriptor"] = self._get_feet_contact(
+        state.info["measures"] = self._get_feet_contact(
             self.env.sys.info(state.qp)
         )
         return state
 
     def step(self, state: State, action: jp.ndarray) -> State:
         state = self.env.step(state, action)
-        state.info["state_descriptor"] = self._get_feet_contact(self.env.sys.aux_info)
+        state.info["measures"] = self._get_feet_contact(self.env.sys.aux_info)
         return state
 
     def _get_feet_contact(self, info: Info) -> jp.ndarray:
@@ -258,7 +258,7 @@ class XYPositionWrapper(QDEnv):
 
     def reset(self, rng: jp.ndarray) -> State:
         state = self.env.reset(rng)
-        state.info["state_descriptor"] = jnp.clip(
+        state.info["measures"] = jnp.clip(
             state.qp.pos[self._cog_idx][:2], a_min=self._minval, a_max=self._maxval
         )
         return state
@@ -266,7 +266,7 @@ class XYPositionWrapper(QDEnv):
     def step(self, state: State, action: jp.ndarray) -> State:
         state = self.env.step(state, action)
         # get xy position of the center of gravity
-        state.info["state_descriptor"] = jnp.clip(
+        state.info["measures"] = jnp.clip(
             state.qp.pos[self._cog_idx][:2], a_min=self._minval, a_max=self._maxval
         )
         return state

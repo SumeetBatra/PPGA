@@ -94,7 +94,7 @@ if __name__ == '__main__':
     cfg.action_shape = vec_env.single_action_space.shape
 
     if cfg.use_wandb:
-        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name)
+        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group)
 
     alg = PPO(cfg.seed, cfg, vec_env)
     num_updates = cfg.total_timesteps // cfg.batch_size
