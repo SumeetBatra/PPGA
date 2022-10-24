@@ -2,6 +2,7 @@ import logging
 import wandb
 import os
 import torch
+import glob
 from colorlog import ColoredFormatter
 
 ch = logging.StreamHandler()
@@ -53,3 +54,8 @@ def save_checkpoint(cp_dir, cp_name, model, optimizer, **kwargs):
     for key, val in kwargs:
         params[key] = val
     torch.save(params, os.path.join(cp_dir, cp_name))
+
+
+def get_checkpoints(checkpoints_dir):
+    checkpoints = glob.glob(os.path.join(checkpoints_dir, 'cp_*'))
+    return sorted(checkpoints)

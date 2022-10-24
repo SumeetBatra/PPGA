@@ -68,6 +68,8 @@ def parse_args():
     parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
     parser.add_argument("--mega_lambda", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
     parser.add_argument('--dqd_lr', type=float, default=0.001, help='Learning rate on gradient arborescence in DQD. Used in cma-mega, cma-maega, etc')
+    parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
+    parser.add_argument('--load_optim_from_cp', type=str, default=None, help='Load an existing QD optimizer from a checkpoint path')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))

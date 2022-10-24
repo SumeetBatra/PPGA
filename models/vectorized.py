@@ -48,6 +48,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
             self.obs_normalizers = [model.obs_normalizer for model in models]
         if cfg.normalize_rewards:
             self.rew_normalizers = [model.reward_normalizer for model in models]
+            self.measure_normalizers = [model.measure_normalizer for model in models]
 
     def _vectorize_layers(self, layer_name, models):
         '''
@@ -119,6 +120,16 @@ class VectorizedPolicy(StochasticPolicy, ABC):
         for i, (model_rews, dones, normalizer) in enumerate(zip(rewards, next_dones, self.rew_normalizers)):
             rewards[i] = normalizer(model_rews, dones)
         return rewards.reshape(-1)
+
+    def vec_normalize_measures(self, measures, next_done):
+        # TODO: make this properly vectorized
+        num_envs = measures.shape[0]
+        envs_per_model = num_envs // self.num_models
+        measures = measures.reshape(self.num_models, envs_per_model, self.cfg.num_dims)
+        next_dones = next_done.reshape(self.num_models, envs_per_model)
+        for i, (model_rews, dones, normalizer) in enumerate(zip(measures, next_dones, self.measure_normalizers)):
+            measures[i] = normalizer(model_rews, dones)
+        return measures.reshape(num_envs, -1)
 
 
 class VectorizedActor(VectorizedPolicy):

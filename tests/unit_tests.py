@@ -9,6 +9,7 @@ from envs.cpu.vec_env import make_vec_env, make_env
 from utils.utils import log
 from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, VectorizedLinearBlock, VectorizedActor
 from models.actor_critic import ActorCriticShared, QDActorCriticShared, Actor
+from utils.normalize_obs import NormalizeReward, VecRewardNormalizer
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
             'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0, 'obs_dim': 28})
@@ -264,46 +265,41 @@ def test_policy_serialize_deserialize():
     assert all_params_equal(model1, model2)
 
 
-# def test_vectorized_stochastic():
-#     random.seed(0)
-#     np.random.seed(0)
-#     torch.manual_seed(0)
-#     torch.backends.cudnn.deterministic = True
-#
-#     torch_state = torch.random.get_rng_state()
-#     random_state = random.getstate()
-#     numpy_state = np.random.get_state()
-#
-#     device = torch.device('cuda')
-#     obs_shape, action_shape = (8,), np.array(2)
-#     models = [Agent(obs_shape, action_shape).to(device) for _ in range(10)]
-#     vec_model = VectorizedPolicy(models, Agent).to(device)
-#     obs = torch.randn((10, 8)).to(device)
-#
-#     acts_for_loop, logprobs_for, entropies_for = [], [], []
-#     for o, model in zip(obs, models):
-#         act, logprob, entropy = model.get_action(o.reshape(1, -1))
-#         acts_for_loop.append(act)
-#         logprobs_for.append(logprob)
-#         entropies_for.append(entropy)
-#     acts_for_loop = torch.cat(acts_for_loop).flatten()
-#     logprobs_for = torch.cat(logprobs_for).flatten()
-#     entropies_for = torch.cat(entropies_for).flatten()
-#
-#     torch.random.set_rng_state(torch_state)
-#     random.setstate(random_state)
-#     np.random.set_state(numpy_state)
-#     random.seed(0)
-#     np.random.seed(0)
-#     torch.manual_seed(0)
-#
-#     acts_vec, logprobs_vec, entropies_vec = vec_model.get_actions(obs, vec_model.action_logstds)
-#     acts_vec = acts_vec.flatten()
-#
-#     assert acts_for_loop == acts_vec, "Error: Actions do not match b/w for-loop and vectorized model inference"
-#     assert logprobs_for == logprobs_vec, "Error: Log-probabilities do not match b/w for-loop and vectorized model " \
-#                                          "inference"
-#     assert entropies_for == entropies_vec, "Error: Entropies do not match b/w for-loop and vectorized model inference"
+def test_vectorized_rew_normalizer():
+    envs_per_model = 5
+    num_models = 10
+    num_envs = num_models * envs_per_model
+    rew_norms = [NormalizeReward(envs_per_model) for _ in range(10)]
+    means = [norm.return_rms.mean for norm in rew_norms]
+    vars = [norm.return_rms.var for norm in rew_norms]
+    means = torch.Tensor(means)
+    vars = torch.Tensor(vars)
+    vec_rew_norm = VecRewardNormalizer(num_envs, num_models, means=means, vars=vars)
+
+    # simulate a rollout
+    nrews_for_loop = []
+    nrews_vec = []
+    for step in range(1000):
+        rews = torch.randn(num_envs).reshape(num_models, envs_per_model)
+        dones = torch.randint(0, 2, size=(num_envs,)).reshape(num_models, envs_per_model)
+
+        n_for = []
+        for rew, done, normalizer in zip(rews, dones, rew_norms):
+            rew = normalizer(rew, done)
+            n_for.append(rew)
+        n_for = torch.cat(n_for)
+        nrews_for_loop.append(n_for)
+
+        # do the same for vectorized version
+        rews = rews.flatten()
+        dones = dones.flatten()
+        nrews = vec_rew_norm(rews, dones)
+        nrews_vec.append(nrews)
+
+    nrews_for_loop = torch.cat(nrews_for_loop).flatten()
+    nrews_vec = torch.cat(nrews_vec).flatten()
+
+    assert torch.allclose(nrews_for_loop, nrews_vec)
 
 
 if __name__ == '__main__':

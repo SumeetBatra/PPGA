@@ -250,6 +250,8 @@ class PPO:
 
                 self.next_obs, _, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
                 measures = infos['measures']
+                if self.cfg.normalize_rewards:  # TODO: make this a separate flag
+                    measures = self.vec_inference.vec_normalize_measures(measures.cpu(), self.next_done)
                 self.measures[step] = measures
 
             # finished the rollout, now we will calculate advantages for the measures

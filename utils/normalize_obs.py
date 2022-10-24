@@ -76,11 +76,11 @@ class NormalizeReward(nn.Module):
         instantiated or the policy was changed recently.
     """
 
-    def __init__(self, num_envs, gamma: float = 0.99, epsilon: float = 1e-8):
+    def __init__(self, num_envs, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8):
         super(NormalizeReward, self).__init__()
         self.num_envs = num_envs
         self.return_rms = RunningMeanStd(shape=())
-        self.returns = torch.zeros((self.num_envs, 1))
+        self.returns = torch.zeros((self.num_envs, reward_dim))
         self.gamma = gamma
         self.epsilon = epsilon
 
@@ -95,3 +95,64 @@ class NormalizeReward(nn.Module):
         rews = rews.to(self.return_rms.var.device)
         self.return_rms.update(self.returns)
         return rews / torch.sqrt(self.return_rms.var + self.epsilon)
+    
+
+class VecRewardNormalizer(nn.Module):
+    def __init__(self, num_envs, num_models, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8, means=None, vars=None):
+        '''
+        Given a list of different behavior models, we want to normalize their rewards independently, but in a 
+        vectorized way 
+        :param num_envs: All envs for all models 
+        :param num_models: Number of different behavior models in a batch
+        :param gamma: reward discount factor
+        :param epsilon: numerical stability 
+        '''
+        super(VecRewardNormalizer, self).__init__()
+        self.num_envs = num_envs
+        self.num_models = num_models
+        if means is None and vars is None:
+            self.register_buffer('mean', torch.zeros(num_models, dtype=torch.float32))
+            self.register_buffer('var', torch.ones(num_models, dtype=torch.float32))
+        else:
+            assert(isinstance(means, torch.Tensor) and isinstance(vars, torch.Tensor)), 'Error, means or vars is not a tensor'
+            self.register_buffer('mean', means)
+            self.register_buffer('var', vars)
+        self.count = epsilon
+        self.returns = torch.zeros((self.num_envs, reward_dim))
+        self.gamma = gamma
+        self.epsilon = epsilon
+        
+    def forward(self, rews, dones):
+        self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
+        rews = self.normalize(rews)
+        self.returns[dones.long()] = 0.0
+        return rews
+    
+    def normalize(self, rews):
+        """Normalizes the rewards with the running mean rewards and their variance."""
+        envs_per_model = self.num_envs // self.num_models
+        rews = rews.to(self.var.device).reshape(self.num_models, envs_per_model)
+        batch_mean = torch.mean(rews, dim=1).flatten()
+        batch_var = torch.var(rews, dim=1).flatten()
+        batch_count = rews.shape[1]
+        self.mean, self.var, self.count = self.update_from_moments(batch_mean, batch_var, batch_count)
+        self.get_buffer('mean')[:] = self.mean
+        self.get_buffer('var')[:] = self.var
+        return rews / torch.repeat_interleave(torch.sqrt(self.var.unsqueeze(1) + self.epsilon), dim=1, repeats=envs_per_model)
+        
+    def update_from_moments(self, batch_mean, batch_var, batch_count):
+        batch_mean = batch_mean.to(self.mean.device)
+        batch_var = batch_var.to(self.var.device)
+        delta = batch_mean - self.mean
+        tot_count = self.count + batch_count
+
+        new_mean = self.mean + delta * batch_count / tot_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + torch.square(delta) * self.count * batch_count / tot_count
+        new_var = m2 / tot_count
+        new_count = tot_count
+        return new_mean, new_var, new_count
+        
+        
+    
