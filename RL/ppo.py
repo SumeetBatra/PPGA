@@ -63,8 +63,8 @@ class PPO:
         self.metric_last_n_window = 10
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
         self.episodic_returns.append(0)
-        self._report_interval = 5.0  # report returns every 5 seconds
-        self._last_interval = 0.0
+        self._report_interval = cfg.report_interval
+        self.num_intervals = 0
         self.total_rewards = torch.zeros(self.vec_env.num_envs)
 
         # seeding
@@ -145,7 +145,7 @@ class PPO:
             returns = advantages + values
         return advantages, returns
 
-    def update(self, values, batched_data, actor_optimizer, i):
+    def update(self, values, batched_data, actor_optimizer, i, measures=False):
         b_values = values.reshape(-1)
         (b_obs, b_logprobs, b_actions, b_advantages, b_returns) = batched_data
 
@@ -162,7 +162,10 @@ class PPO:
 
                 _, newlogprob, entropy = self._agents[i].get_action(b_obs[mb_inds],
                                                                     b_actions[mb_inds])
-                newvalue = self._critic.get_value(b_obs[mb_inds])
+                if measures:
+                    newvalue = self._critic.get_measure_value(b_obs[mb_inds], dim=i)
+                else:
+                    newvalue = self._critic.get_value(b_obs[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -217,7 +220,8 @@ class PPO:
         global_step = 0
         original_params = copy.deepcopy(self._agents[0].serialize())
         agent_params = [copy.deepcopy(self._agents[0]).serialize() for _ in range(self.cfg.num_dims)]
-        agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(agent_params[i]).to(self.device) for i in range(self.cfg.num_dims)]
+        agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(agent_params[i]).to(self.device) for i
+                  in range(self.cfg.num_dims)]
         num_agents = len(agents)  # this is essentially the number of measures
         self.agents = agents  # this also updates the optimizers and vec_inference
 
@@ -236,7 +240,7 @@ class PPO:
                     measure_vals = []
                     # TODO: can this be vectorized?
                     for i, obs in enumerate(obs_per_measure):
-                        measure_value = self._critic.get_measure_value(obs, dim=i)
+                        measure_value = self._critic.get_measure_value(obs, dim=i).flatten()
                         measure_vals.append(measure_value)
                     measure_vals = torch.cat(measure_vals)
                     self.measure_values[step] = measure_vals
@@ -266,7 +270,7 @@ class PPO:
             for i in range(self.vec_inference.num_models):
                 (pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
                     b_values[i], (b_obs[i], b_logprobs[i], b_actions[i], b_advantages[i], b_returns[i]),
-                    self.actor_optimizers[i], i)
+                    self.actor_optimizers[i], i, measures=True)
 
             # update vec inference
             # TODO: create an update_params() method instead of recreating vec_inf each time
@@ -312,9 +316,6 @@ class PPO:
                     action, logprob, _ = self.vec_inference.get_action(self.next_obs)
                     value = self._critic.get_value(self.next_obs)
                     self.values[step] = value.flatten()
-                    # if self.cfg.algorithm == 'qd-ppo':
-                    #     measure_values = self.vec_inference.get_measure_values(self.next_obs)
-                    #     self.measure_values[step] = measure_values
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
@@ -326,22 +327,15 @@ class PPO:
                     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
                 self.rewards[step] = reward.squeeze()
 
-                # measures = infos['measures']
-                # self.measures[step] = measures
-
-                ########################################
-                ## EXPERIMENTAL
-                # m_reward = (measures.unsqueeze(dim=1).reshape(len(self._agents), -1, self.cfg.num_dims) *
-                #             self.vec_inference.measure_coeffs.unsqueeze(dim=1)).sum(dim=2).reshape(-1)
-                # reward += m_reward
-                ########################################
-
-                for i, done in enumerate(self.next_done.flatten()):
-                    if done:
-                        total_reward = self.total_rewards[i].clone()
-                        # log.debug(f'{total_reward=}')
-                        self.episodic_returns.append(total_reward)
-                        self.total_rewards[i] = 0
+                # TODO: move this to a separate process
+                if self.num_intervals % self._report_interval == 0:
+                    for i, done in enumerate(self.next_done.flatten()):
+                        if done:
+                            total_reward = self.total_rewards[i].clone()
+                            # log.debug(f'{total_reward=}')
+                            self.episodic_returns.append(total_reward)
+                            self.total_rewards[i] = 0
+                self.num_intervals += 1
 
             advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
                                                          self.dones,
@@ -364,32 +358,6 @@ class PPO:
             self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
                                                  obs_shape=self.obs_shape,
                                                  action_shape=self.action_shape)
-
-            #########################
-            ### TESTING #############
-            # if self.cfg.algorithm == 'qd-ppo':
-            #
-            #     m_grads = []
-            #     next_done_repeated = torch.repeat_interleave(next_done.unsqueeze(1), repeats=self.cfg.num_dims, dim=-1)
-            #     dones_repeated = torch.repeat_interleave(self.dones.unsqueeze(2), repeats=self.cfg.num_dims, dim=-1)
-            #     m_advantages, m_returns = self.calculate_rewards(next_obs, next_done_repeated, self.measures,
-            #                                                      self.measure_values, dones_repeated,
-            #                                                      rollout_length=self.cfg.rollout_length,
-            #                                                      measure_reward=True)
-            #     bm_advantages = m_advantages.reshape(-1, self.cfg.num_dims)
-            #     bm_returns = m_returns.reshape(-1, self.cfg.num_dims)
-            #     for i in range(self.cfg.num_dims):
-            #         # reset agent back to original solution point
-            #         self._agent.deserialize(original_params).to(self.device)
-            #         _ = self.update(self.measure_values[:, :, i],
-            #                         (b_obs, b_logprobs, b_actions, bm_advantages[:, i], bm_returns[:, i]))
-            #         m_grad = self._agent.serialize() - original_params
-            #         m_grads.append(m_grad)
-
-            #########################
-            #########################
-            # fake the gradients for testing
-            m_grads = np.zeros((self.vec_inference.num_models, self.cfg.num_dims, len(original_params)))
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -423,6 +391,11 @@ class PPO:
             log.debug("Done!")
         else:
             obj_grad = self._agents[0].serialize() - original_params
+            original_agent = Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(original_params).to(
+                self.device)
+            self.vec_inference = VectorizedActor(self.cfg, [original_agent], Actor,
+                                                 obs_shape=self.obs_shape,
+                                                 action_shape=self.action_shape)
             f, m = self.evaluate(self.vec_inference, self.multi_eval_env)
             return f.reshape(self.vec_inference.num_models, ), \
                    obj_grad.reshape(self.vec_inference.num_models, -1), \

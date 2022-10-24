@@ -21,6 +21,7 @@ def parse_args():
                         help='Use weights and biases to track the exp')
     parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
     parser.add_argument('--wandb_group', type=str)
+    parser.add_argument('--report_interval', type=int, default=5, help='Log objective results every N updates')
 
     # algorithm args
     parser.add_argument('--total_timesteps', type=int, default=1000000)
