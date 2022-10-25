@@ -365,9 +365,12 @@ class PPO:
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+            avg_log_stddev = self._agents[0].actor_logstd.mean().detach().cpu().numpy()
+
             if self.cfg.use_wandb:
                 wandb.log({
                     "charts/learning_rate": self.actor_optimizers[0].param_groups[0]['lr'],
+                    "charts/actor_avg_logstd": avg_log_stddev,
                     "losses/value_loss": v_loss.item(),
                     "losses/policy_loss": pg_loss.item(),
                     "losses/entropy": entropy_loss.item(),
