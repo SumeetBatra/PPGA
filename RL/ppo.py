@@ -250,8 +250,8 @@ class PPO:
 
                 self.next_obs, _, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
                 measures = infos['measures']
-                if self.cfg.normalize_rewards:  # TODO: make this a separate flag
-                    measures = self.vec_inference.vec_normalize_measures(measures.cpu(), self.next_done)
+                # if self.cfg.normalize_rewards:  # TODO: make this a separate flag
+                #     measures = self.vec_inference.vec_normalize_measures(measures.cpu(), self.next_done)
                 self.measures[step] = measures
 
             # finished the rollout, now we will calculate advantages for the measures
@@ -298,7 +298,7 @@ class PPO:
 
         return m_grads
 
-    def train(self, num_updates, rollout_length):
+    def train(self, num_updates, rollout_length, dqd=False):
         global_step = 0
 
         num_agents = len(self._agents)
@@ -387,14 +387,14 @@ class PPO:
 
         train_elapse = time.time() - train_start
         log.debug(f'train() took {train_elapse:.2f} seconds to complete')
-        if self.cfg.algorithm == 'ppo':
+        if not dqd:
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):
                 save_checkpoint('checkpoints', f'brax_model_{i}_checkpoint', self._agents[i], self.actor_optimizers[i])
             # self.vec_env.stop.emit()
             log.debug("Done!")
-        else:
+        elif dqd:
             obj_grad = self._agents[0].serialize() - original_params
             original_agent = Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(original_params).to(
                 self.device)
