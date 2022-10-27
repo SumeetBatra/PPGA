@@ -96,6 +96,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
 
                 # update action logprobs
                 model.actor_logstd.data = self.actor_logstd[i]
+        return models
 
     @abstractmethod
     def forward(self, x):

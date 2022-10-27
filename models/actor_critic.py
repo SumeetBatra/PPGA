@@ -179,11 +179,12 @@ class Critic(nn.Module):
 class QDCritic(Critic):
     def __init__(self, obs_shape, measure_dim):
         Critic.__init__(self, obs_shape)
-        self.measure_critics = torch.nn.ModuleList([
-            nn.Sequential(layer_init(nn.Linear(64, 1), std=1.0)) for _ in range(measure_dim)
-        ])
+        self.measure_critics = nn.Sequential(layer_init(nn.Linear(64, 4), std=1.0))
 
     def get_measure_value(self, obs, dim):
         core_out = self.core(obs)
-        return self.measure_critics[dim](core_out)
+        return self.measure_critics(core_out)[:, dim]
 
+    def get_measure_values(self, obs):
+        core_out = self.core(obs)
+        return self.measure_critics(core_out)

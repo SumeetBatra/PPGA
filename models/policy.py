@@ -17,7 +17,7 @@ class StochasticPolicy(ABC, nn.Module):
         if cfg.normalize_obs:
             self.obs_normalizer = NormalizeObservation(cfg.obs_shape)
         if cfg.normalize_rewards:
-            self.reward_normalizer = NormalizeReward(cfg.num_envs)
+            self.reward_normalizer = NormalizeReward(cfg.num_envs // (cfg.num_dims + 1))
             self.measure_normalizer = NormalizeReward(cfg.num_envs // cfg.num_dims, reward_dim=cfg.num_dims)  # TODO: fix this
 
     @abstractmethod

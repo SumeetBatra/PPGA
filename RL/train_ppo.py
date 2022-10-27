@@ -70,6 +70,7 @@ def parse_args():
     parser.add_argument('--dqd_lr', type=float, default=0.001, help='Learning rate on gradient arborescence in DQD. Used in cma-mega, cma-maega, etc')
     parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
     parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
+    parser.add_argument('--pretrain', type=lambda x: bool(strtobool(x)), default=False, help='Pretrain a policy with PPO as the initial solution point for DQD')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
