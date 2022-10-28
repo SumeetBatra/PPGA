@@ -32,7 +32,7 @@ class PPO:
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
         self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
-        self.critic_optimizer = torch.optim.Adam(critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self.critic_optimizer = torch.optim.Adam(self._critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
         # # single policy eval env
@@ -267,15 +267,16 @@ class PPO:
                     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
                 self.rewards[step] = reward.squeeze()
 
-                # TODO: move this to a separate process
-                if self.num_intervals % self._report_interval == 0:
-                    for i, done in enumerate(self.next_done.flatten()):
-                        if done:
-                            total_reward = self.total_rewards[i].clone()
-                            # log.debug(f'{total_reward=}')
-                            self.episodic_returns.append(total_reward)
-                            self.total_rewards[i] = 0
-                self.num_intervals += 1
+                if not dqd:
+                    # TODO: move this to a separate process
+                    if self.num_intervals % self._report_interval == 0:
+                        for i, done in enumerate(self.next_done.flatten()):
+                            if done:
+                                total_reward = self.total_rewards[i].clone()
+                                # log.debug(f'{total_reward=}')
+                                self.episodic_returns.append(total_reward)
+                                self.total_rewards[i] = 0
+                    self.num_intervals += 1
 
             if dqd:
                 with torch.no_grad():
@@ -293,6 +294,8 @@ class PPO:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, rew_measures,
                                                              self.values, self.dones,
                                                              rollout_length=self.cfg.rollout_length, dqd=True)
+                returns = torch.cat((returns.unsqueeze(dim=2), self.measures), dim=2)
+                returns = (returns * mask).sum(dim=2)
             else:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
                                                              self.dones,
