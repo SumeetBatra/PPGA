@@ -11,7 +11,7 @@ from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
 from envs.brax_custom.gpu_env import make_vec_env_brax
 from utils.utils import log, save_checkpoint
 from models.vectorized import VectorizedActor
-from models.actor_critic import Actor, Critic, QDCritic
+from models.actor_critic import Actor, Critic, QDCritic, QDCritic2
 
 
 # based off of the clean-rl implementation
@@ -27,7 +27,7 @@ class PPO:
 
         agent = Actor(cfg, self.obs_shape, self.action_shape).to(self.device)
         self._agents = [agent]
-        critic = QDCritic(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
+        critic = QDCritic2(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
         self._critic = critic
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
@@ -84,7 +84,7 @@ class PPO:
         self.dones = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
-        self.measure_values = torch.zeros_like(self.measures).to(self.device)
+        self.measure_values = torch.zeros_like(self.values).to(self.device)
 
         next_obs = self.vec_env.reset()
         self.next_obs = next_obs.to(self.device)
@@ -106,13 +106,17 @@ class PPO:
         # bootstrap value if not done
         with torch.no_grad():
             if dqd:
-                next_obj_val = self._critic.get_value(next_obs)
-                next_m_vals = self._critic.get_measure_values(next_obs).reshape(self.cfg.num_envs, -1)
-                next_value = torch.cat((next_obj_val, next_m_vals), dim=1)
-                mask = torch.eye(self.cfg.num_dims + 1).to(self.device)
-                envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
-                mask = torch.repeat_interleave(mask, dim=0, repeats=envs_per_dim)
-                next_value = (next_value * mask).sum(dim=1).reshape(1, -1)
+                next_obs = next_obs.reshape(self.cfg.num_dims + 1, self.cfg.num_envs // (self.cfg.num_dims + 1), -1)
+                next_value = []
+                for i, obs, in enumerate(next_obs):
+                    next_value.append(self._critic.get_value_at(obs, dim=i))
+                next_value = torch.cat(next_value).reshape(1, -1).to(self.device)
+
+                # next_value = torch.cat((next_obj_val, next_m_vals), dim=1)
+                # mask = torch.eye(self.cfg.num_dims + 1).to(self.device)
+                # envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
+                # mask = torch.repeat_interleave(mask, dim=0, repeats=envs_per_dim)
+                # next_value = (next_value * mask).sum(dim=1).reshape(1, -1)
             else:
                 next_value = self._critic.get_value(next_obs).reshape(1, -1).to(self.device)
             # assume we use gae
@@ -154,13 +158,17 @@ class PPO:
                                                                        b_actions[:, mb_inds].reshape(-1, action_dim))
 
                 if dqd:
-                    next_obj_val = self._critic.get_value(b_obs[:, mb_inds])
-                    next_m_vals = self._critic.get_measure_values(b_obs[:, mb_inds])
-                    next_value = torch.cat((next_obj_val, next_m_vals), dim=2)
-                    mask = torch.eye(self.cfg.num_dims + 1).unsqueeze(dim=1).to(self.device)
-                    newvalue = (next_value * mask).sum(dim=2)
+                    newvalue = []
+                    for i in range(self.cfg.num_dims + 1):
+                        newvalue.append(self._critic.get_value_at(b_obs[i, mb_inds], dim=i))
+                    newvalue = torch.cat(newvalue).to(self.device)
+
+                    # next_value = torch.cat((next_obj_val, next_m_vals), dim=1)
+                    # mask = torch.eye(self.cfg.num_dims + 1).to(self.device)
+                    # mask = torch.repeat_interleave(mask, dim=0, repeats=minibatch_size)
+                    # newvalue = (next_value * mask).sum(dim=1)
                 else:
-                    newvalue = self._critic.get_value(b_obs[:, mb_inds])
+                    newvalue = self._critic.get_value(b_obs[:, mb_inds].reshape(-1, obs_dim))
 
                 logratio = newlogprob - b_logprobs[:, mb_inds].flatten()
                 ratio = logratio.exp()
@@ -212,88 +220,6 @@ class PPO:
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
-    def get_measure_grads(self, num_updates, rollout_length):
-        global_step = 0
-        original_params = copy.deepcopy(self._agents[0].serialize())
-        agent_params = [copy.deepcopy(self._agents[0]).serialize() for _ in range(self.cfg.num_dims)]
-        agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(agent_params[i]).to(self.device) for i
-                  in range(self.cfg.num_dims)]
-        num_agents = len(agents)  # this is essentially the number of measures
-        self.agents = agents  # this also updates the optimizers and vec_inference
-
-        start = time.time()
-        for update in range(1, num_updates + 1):
-            for step in range(rollout_length):
-                global_step += self.vec_env.num_envs
-                if self.cfg.normalize_obs:
-                    self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
-                self.obs[step] = self.next_obs
-                self.dones[step] = self.next_done.view(-1)
-
-                with torch.no_grad():
-                    action, logprob, _ = self.vec_inference.get_action(self.next_obs)
-                    obs_per_measure = self.next_obs.reshape(num_agents, self.vec_env.num_envs // num_agents, -1)
-                    measure_vals = []
-                    # TODO: can this be vectorized?
-                    for i, obs in enumerate(obs_per_measure):
-                        measure_value = self._critic.get_measure_value(obs, dim=i).flatten()
-                        measure_vals.append(measure_value)
-                    measure_vals = torch.cat(measure_vals)
-                    self.measure_values[step] = measure_vals
-
-                self.actions[step] = action
-                self.logprobs[step] = logprob
-
-                self.next_obs, _, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
-                measures = infos['measures']
-                # if self.cfg.normalize_rewards:  # TODO: make this a separate flag
-                #     measures = self.vec_inference.vec_normalize_measures(measures.cpu(), self.next_done)
-                self.measures[step] = measures
-
-            # finished the rollout, now we will calculate advantages for the measures
-            advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.measures,
-                                                         self.measure_values, self.dones,
-                                                         rollout_length=self.cfg.rollout_length, measure_reward=True)
-
-            # use the data to get m_grads and update the respective policies
-
-            # flatten the batch
-            b_obs = self.obs.reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
-            b_logprobs = self.logprobs.reshape(num_agents, -1)
-            b_actions = self.actions.reshape((num_agents, -1,) + self.vec_env.single_action_space.shape)
-            b_advantages = advantages.reshape(num_agents, -1)
-            b_returns = returns.reshape(num_agents, -1)
-            b_values = self.values.reshape(num_agents, -1)
-
-            for i in range(self.vec_inference.num_models):
-                (pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs) = self.update(
-                    b_values[i], (b_obs[i], b_logprobs[i], b_actions[i], b_advantages[i], b_returns[i]),
-                    self.actor_optimizers[i], i, measures=True)
-
-            # update vec inference
-            # TODO: create an update_params() method instead of recreating vec_inf each time
-            self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
-                                                 obs_shape=self.obs_shape,
-                                                 action_shape=self.action_shape)
-
-            if self.cfg.use_wandb:
-                wandb.log({
-                    "QDLosses/measures_value_loss": v_loss.item(),
-                    "QDLosses/measures_policy_loss": pg_loss.item(),
-                    "QDLosses/measures_old_approx_kl": old_approx_kl.item(),
-                    "QDLosses/measures_approx_kl": approx_kl.item(),
-                    "QDLosses/measures_clipfrac": np.mean(clipfracs)
-                })
-
-            log.debug(f'Finished PPO iteration {update} for measures')
-
-        m_grads = np.array([self._agents[i].serialize() - original_params for i in range(num_agents)])
-        m_grads = m_grads.reshape(1, self.cfg.num_dims, -1)  # TODO: fix this
-        elapsed = time.time() - start
-        log.debug(f'Calculating measure grads took {elapsed:.2f} seconds to complete')
-
-        return m_grads
-
     def train(self, num_updates, rollout_length, dqd=False):
         global_step = 0
 
@@ -319,11 +245,15 @@ class PPO:
 
                 with torch.no_grad():
                     action, logprob, _ = self.vec_inference.get_action(self.next_obs)
-                    value = self._critic.get_value(self.next_obs)
                     if dqd:
-                        measure_values = self._critic.get_measure_values(self.next_obs)
-                        self.measure_values[step] = measure_values
-                    self.values[step] = value.flatten()
+                        next_obs = self.next_obs.reshape(num_agents, self.cfg.num_envs // num_agents, -1)
+                        value = []
+                        for i, obs in enumerate(next_obs):
+                            value.append(self._critic.get_value_at(obs, i))
+                        value = torch.cat(value).reshape(-1).to(self.device)
+                    else:
+                        value = self._critic.get_value(self.next_obs)
+                self.values[step] = value.flatten()
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
@@ -348,18 +278,20 @@ class PPO:
                 self.num_intervals += 1
 
             if dqd:
-                # concat obj and measure values and mask them appropriately
-                obj_measure_values = torch.cat((self.values.unsqueeze(dim=2), self.measure_values), dim=2)
-                envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
-                mask = torch.eye(self.cfg.num_dims + 1)
-                mask = torch.repeat_interleave(mask, dim=0, repeats=envs_per_dim).unsqueeze(dim=0).to(self.device)
-                obj_measure_values = (obj_measure_values * mask).sum(dim=2)
+                with torch.no_grad():
+                    envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
+                    mask = torch.eye(self.cfg.num_dims + 1)
+                    mask = torch.repeat_interleave(mask, dim=0, repeats=envs_per_dim).unsqueeze(dim=0).to(self.device)
 
-                # concat the reward w/ measures and mask appropriately
-                rew_measures = torch.cat((self.rewards.unsqueeze(dim=2), self.measures), dim=2)
-                rew_measures = (rew_measures * mask).sum(dim=2)
+                    # concat obj and measure values and mask them appropriately
+                    # obj_measure_values = torch.cat((self.values.unsqueeze(dim=2), self.measure_values), dim=2)
+                    # obj_measure_values = (obj_measure_values * mask).sum(dim=2)
+
+                    # concat the reward w/ measures and mask appropriately
+                    rew_measures = torch.cat((self.rewards.unsqueeze(dim=2), self.measures), dim=2)
+                    rew_measures = (rew_measures * mask).sum(dim=2)
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, rew_measures,
-                                                             obj_measure_values, self.dones,
+                                                             self.values, self.dones,
                                                              rollout_length=self.cfg.rollout_length, dqd=True)
             else:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,

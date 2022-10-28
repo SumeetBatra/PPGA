@@ -13,7 +13,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class ActorCriticSeparate(StochasticPolicy):
     def __init__(self, obs_shape, action_shape: np.ndarray, **kwargs):
-        super().__init__(normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
+        super().__init__(normalize_obs=kwargs.get('normalize_obs', False),
+                         normalize_rewards=kwargs.get('normalize_rewards', False))
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
             nn.Tanh(),
@@ -176,15 +177,59 @@ class Critic(nn.Module):
         return self.critic(core_out)
 
 
+class QDCritic2(nn.Module):
+    def __init__(self, obs_shape, measure_dim):
+        super(QDCritic2, self).__init__()
+        self.measure_dim = measure_dim
+        self.all_critics = nn.ModuleList([
+            nn.Sequential(
+                layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 1), std=1.0)
+            ) for _ in range(measure_dim + 1)
+        ])
+
+    def get_value_at(self, obs, dim):
+        return self.all_critics[dim](obs)
+
+    def get_all_values(self, obs):
+        all_vals = []
+        for critic in self.all_critics:
+            all_vals.append(critic(obs))
+        all_vals = torch.cat(all_vals).to(obs.device)
+        return all_vals
+
+    def get_value(self, obs):
+        '''
+        Implemented for backwards compatibility
+        '''
+        return self.all_critics[0](obs)
+
+
 class QDCritic(Critic):
     def __init__(self, obs_shape, measure_dim):
         Critic.__init__(self, obs_shape)
-        self.measure_critics = nn.Sequential(layer_init(nn.Linear(64, 4), std=1.0))
+        self.measure_dim = measure_dim
+        self.measure_critics = nn.ModuleList([
+            nn.Sequential(layer_init(nn.Linear(64, 1), std=1.0)) for _ in range(measure_dim)
+        ])
 
     def get_measure_value(self, obs, dim):
         core_out = self.core(obs)
-        return self.measure_critics(core_out)[:, dim]
+        return self.measure_critics[dim](core_out)
 
     def get_measure_values(self, obs):
         core_out = self.core(obs)
-        return self.measure_critics(core_out)
+        return torch.Tensor([critic(core_out) for critic in self.measure_critics]).reshape(self.measure_dim).to(
+            self.device)
+
+    def get_obj_and_measure_values(self, obs):
+        core_out = self.core(obs)
+        obj_val = self.critic(core_out)
+        measure_vals = []
+        for critic in self.measure_critics:
+            measure_vals.append(critic(core_out))
+        measure_vals = torch.cat(measure_vals).reshape(-1, self.measure_dim).to(obj_val.device)
+        return obj_val, measure_vals
