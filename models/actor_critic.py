@@ -13,8 +13,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 class ActorCriticSeparate(StochasticPolicy):
     def __init__(self, obs_shape, action_shape: np.ndarray, **kwargs):
-        super().__init__(normalize_obs=kwargs.get('normalize_obs', False),
-                         normalize_rewards=kwargs.get('normalize_rewards', False))
+        super().__init__(normalize_obs=kwargs.get('normalize_obs', False), normalize_rewards=kwargs.get('normalize_rewards', False))
         self.critic = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
             nn.Tanh(),
@@ -152,11 +151,10 @@ class Actor(StochasticPolicy):
         action_mean = self.actor_mean(obs)
         action_logstd = self.actor_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
-        cov_mat = torch.diag_embed(action_std)
-        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
+        probs = torch.distributions.Normal(action_mean, action_std)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
+        return action, probs.log_prob(action).sum(1), probs.entropy()
 
 
 class Critic(nn.Module):
@@ -211,8 +209,7 @@ class QDCritic2(nn.Module):
 class QDCritic(Critic):
     def __init__(self, obs_shape, measure_dim):
         Critic.__init__(self, obs_shape)
-        self.measure_dim = measure_dim
-        self.measure_critics = nn.ModuleList([
+        self.measure_critics = torch.nn.ModuleList([
             nn.Sequential(layer_init(nn.Linear(64, 1), std=1.0)) for _ in range(measure_dim)
         ])
 
@@ -220,10 +217,6 @@ class QDCritic(Critic):
         core_out = self.core(obs)
         return self.measure_critics[dim](core_out)
 
-    def get_measure_values(self, obs):
-        core_out = self.core(obs)
-        return torch.Tensor([critic(core_out) for critic in self.measure_critics]).reshape(self.measure_dim).to(
-            self.device)
 
     def get_obj_and_measure_values(self, obs):
         core_out = self.core(obs)

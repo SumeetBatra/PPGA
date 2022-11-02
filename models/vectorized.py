@@ -48,7 +48,6 @@ class VectorizedPolicy(StochasticPolicy, ABC):
             self.obs_normalizers = [model.obs_normalizer for model in models]
         if cfg.normalize_rewards:
             self.rew_normalizers = [model.reward_normalizer for model in models]
-            self.measure_normalizers = [model.measure_normalizer for model in models]
 
     def _vectorize_layers(self, layer_name, models):
         '''
@@ -152,11 +151,12 @@ class VectorizedActor(VectorizedPolicy):
         action_logstd = torch.repeat_interleave(self.actor_logstd, repeats, dim=0)
         action_logstd = action_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
-        cov_mat = torch.diag_embed(action_std)
-        probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
+        probs = torch.distributions.Normal(action_mean, action_std)
+        # cov_mat = torch.diag_embed(action_std)
+        # probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
         if action is None:
             action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy()
+        return action, probs.log_prob(action).sum(1), probs.entropy()
 
 
 class VectorizedActorCriticShared(StochasticPolicy):

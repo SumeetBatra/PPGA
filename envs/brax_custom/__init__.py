@@ -42,6 +42,7 @@ import gym
 
 from envs.brax_custom.wrappers.locomotion_wrappers import FeetContactWrapper
 from envs.brax_custom.wrappers.reward import TotalReward
+from envs.brax_custom.wrappers.action_clip import ActionClipWrapper
 
 _envs = {
     'acrobot': acrobot.Acrobot,
@@ -75,6 +76,7 @@ def register_environment(env_name: str, env_class: Type[Env]):
 def create(env_name: str,
            episode_length: int = 1000,
            action_repeat: int = 1,
+           clip_actions: Optional[tuple] = None,
            auto_reset: bool = True,
            batch_size: Optional[int] = None,
            eval_metrics: bool = False,
@@ -82,6 +84,8 @@ def create(env_name: str,
     """Creates an Env with a specified brax_custom system."""
     env = _envs[env_name](legacy_spring=True, **kwargs)
     env = FeetContactWrapper(env, env_name)
+    if clip_actions:
+        env = ActionClipWrapper(env, a_min=clip_actions[0], a_max=clip_actions[1])
     if episode_length is not None:
         env = wrappers.EpisodeWrapper(env, episode_length, action_repeat)
     if batch_size:

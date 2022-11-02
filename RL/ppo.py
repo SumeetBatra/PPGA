@@ -55,8 +55,8 @@ class PPO:
         else:
             # brax env
             multi_eval_cfg = copy.deepcopy(cfg)
-            multi_eval_cfg.env_batch_size = 1024
-            self.multi_eval_env = make_vec_env_brax(cfg)
+            multi_eval_cfg.env_batch_size = 1000
+            self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
 
             # metrics for logging
         self.metric_last_n_window = 10
@@ -84,7 +84,6 @@ class PPO:
         self.dones = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
         self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
-        self.measure_values = torch.zeros_like(self.values).to(self.device)
 
         next_obs = self.vec_env.reset()
         self.next_obs = next_obs.to(self.device)
@@ -111,12 +110,6 @@ class PPO:
                 for i, obs, in enumerate(next_obs):
                     next_value.append(self._critic.get_value_at(obs, dim=i))
                 next_value = torch.cat(next_value).reshape(1, -1).to(self.device)
-
-                # next_value = torch.cat((next_obj_val, next_m_vals), dim=1)
-                # mask = torch.eye(self.cfg.num_dims + 1).to(self.device)
-                # envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
-                # mask = torch.repeat_interleave(mask, dim=0, repeats=envs_per_dim)
-                # next_value = (next_value * mask).sum(dim=1).reshape(1, -1)
             else:
                 next_value = self._critic.get_value(next_obs).reshape(1, -1).to(self.device)
             # assume we use gae
@@ -162,11 +155,6 @@ class PPO:
                     for i in range(self.cfg.num_dims + 1):
                         newvalue.append(self._critic.get_value_at(b_obs[i, mb_inds], dim=i))
                     newvalue = torch.cat(newvalue).to(self.device)
-
-                    # next_value = torch.cat((next_obj_val, next_m_vals), dim=1)
-                    # mask = torch.eye(self.cfg.num_dims + 1).to(self.device)
-                    # mask = torch.repeat_interleave(mask, dim=0, repeats=minibatch_size)
-                    # newvalue = (next_value * mask).sum(dim=1)
                 else:
                     newvalue = self._critic.get_value(b_obs[:, mb_inds].reshape(-1, obs_dim))
 
@@ -284,18 +272,14 @@ class PPO:
                     mask = torch.eye(self.cfg.num_dims + 1)
                     mask = torch.repeat_interleave(mask, dim=0, repeats=envs_per_dim).unsqueeze(dim=0).to(self.device)
 
-                    # concat obj and measure values and mask them appropriately
-                    # obj_measure_values = torch.cat((self.values.unsqueeze(dim=2), self.measure_values), dim=2)
-                    # obj_measure_values = (obj_measure_values * mask).sum(dim=2)
-
                     # concat the reward w/ measures and mask appropriately
                     rew_measures = torch.cat((self.rewards.unsqueeze(dim=2), self.measures), dim=2)
                     rew_measures = (rew_measures * mask).sum(dim=2)
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, rew_measures,
                                                              self.values, self.dones,
                                                              rollout_length=self.cfg.rollout_length, dqd=True)
-                returns = torch.cat((returns.unsqueeze(dim=2), self.measures), dim=2)
-                returns = (returns * mask).sum(dim=2)
+                # returns = torch.cat((returns.unsqueeze(dim=2), self.measures), dim=2)
+                # returns = (returns * mask).sum(dim=2)
             else:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
                                                              self.dones,
@@ -345,11 +329,15 @@ class PPO:
 
         train_elapse = time.time() - train_start
         log.debug(f'train() took {train_elapse:.2f} seconds to complete')
+        fps = global_step / train_elapse
+        log.debug(f'FPS: {fps:.2f}')
+        if self.cfg.use_wandb:
+            wandb.log({'FPS: ': fps})
         if not dqd:
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):
-                save_checkpoint('checkpoints', f'brax_model_{i}_checkpoint', trained_models[i],
+                save_checkpoint('checkpoints', f'{self.cfg.env_name}_brax_model_{i}_checkpoint_debug', trained_models[i],
                                 self.vec_optimizer)
             # self.vec_env.stop.emit()
             log.debug("Done!")
@@ -393,7 +381,7 @@ class PPO:
                 if self.cfg.normalize_obs:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
-                obs, rew, next_dones, infos = vec_env.step(acts.detach().cpu().numpy())
+                obs, rew, next_dones, infos = vec_env.step(acts)
                 traj_length += 1
                 measures += infos['measures']  # TODO: should this be truncated?
                 obs = obs.to(self.device)
@@ -405,6 +393,8 @@ class PPO:
         measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
 
         max_reward = np.max(total_reward)
+        min_reward = np.min(total_reward)
+        mean_reward = np.mean(total_reward)
         total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
         total_reward = total_reward.mean(axis=1)
 
@@ -414,6 +404,8 @@ class PPO:
         log.info(f'BC on eval: {measures}')
         log.info(f'Rewards on eval: {total_reward}')
         log.info(f'Max Reward on eval: {max_reward}')
+        log.info(f'Min Reward on eval: {min_reward}')
+        log.info(f'Mean Reward across all agents: {mean_reward}')
         # log.info(f'{traj_lengths=}')
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims).detach().cpu().numpy()

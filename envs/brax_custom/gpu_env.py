@@ -9,17 +9,22 @@ from jax.dlpack import to_dlpack
 import torch
 v = torch.ones(1, device='cuda')  # init torch cuda before jax
 
-_to_brax_env_name = {
-    'ant': 'brax_custom-ant-v0'
+_to_custom_env = {
+    'ant': {'custom_env_name': 'brax_custom-ant-v0',
+            'action_clip': (-1, 1)},
+    'humanoid': {'custom_env_name': 'brax_custom-humanoid-v0',
+                 'action_clip': (-1, 1)},
 }
 
 
 def make_vec_env_brax(cfg):
     entry_point = functools.partial(brax_custom.create_gym_env, env_name=cfg.env_name)
-    if 'brax_custom-ant-v0' not in gym.envs.registry.env_specs:
-        gym.register('brax_custom-ant-v0', entry_point=entry_point)
+    brax_env_name = _to_custom_env[cfg.env_name]['custom_env_name']
+    if brax_env_name not in gym.envs.registry.env_specs:
+        gym.register(brax_env_name, entry_point=entry_point)
 
-    vec_env = gym.make(_to_brax_env_name[cfg.env_name], batch_size=cfg.env_batch_size, seed=cfg.seed)
+    act_bounds = _to_custom_env[cfg.env_name]['action_clip']
+    vec_env = gym.make(_to_custom_env[cfg.env_name]['custom_env_name'], batch_size=cfg.env_batch_size, seed=cfg.seed, clip_actions=act_bounds)
     vec_env = to_torch.JaxToTorchWrapper(vec_env, device='cuda')
 
     # vec_env = gym.wrappers.ClipAction(vec_env)

@@ -3,6 +3,8 @@ import wandb
 import os
 import torch
 import glob
+import json
+from attrdict import AttrDict
 from colorlog import ColoredFormatter
 
 ch = logging.StreamHandler()
@@ -54,6 +56,16 @@ def save_checkpoint(cp_dir, cp_name, model, optimizer, **kwargs):
     for key, val in kwargs:
         params[key] = val
     torch.save(params, os.path.join(cp_dir, cp_name))
+
+
+def save_cfg(dir, cfg):
+    def to_dict(cfg):
+        if isinstance(cfg, AttrDict):
+            cfg = dict(cfg)
+    filename = 'cfg.json'
+    fp = os.path.join(dir, filename)
+    with open(fp, 'w') as f:
+        json.dump(cfg, f, default=to_dict, indent=4)
 
 
 def get_checkpoints(checkpoints_dir):

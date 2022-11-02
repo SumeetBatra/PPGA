@@ -4,7 +4,7 @@ import numpy as np
 
 from distutils.util import strtobool
 from attrdict import AttrDict
-from utils.utils import config_wandb
+from utils.utils import config_wandb, log
 from RL.ppo import PPO
 from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
 from envs.brax_custom.gpu_env import make_vec_env_brax
@@ -71,6 +71,8 @@ def parse_args():
     parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
     parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
     parser.add_argument('--pretrain', type=lambda x: bool(strtobool(x)), default=False, help='Pretrain a policy with PPO as the initial solution point for DQD')
+    parser.add_argument('--total_iterations', type=int, default=100, help='Number of iterations to run the entire dqd-rl loop')
+    parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'], help='Which DQD algorithm should be running in the outer loop')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -96,6 +98,8 @@ if __name__ == '__main__':
     cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
     cfg.obs_shape = vec_env.single_observation_space.shape
     cfg.action_shape = vec_env.single_action_space.shape
+
+    log.debug(f'Environment: {cfg.env_name}, obs_shape: {cfg.obs_shape}, action_shape: {cfg.action_shape}')
 
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group)
