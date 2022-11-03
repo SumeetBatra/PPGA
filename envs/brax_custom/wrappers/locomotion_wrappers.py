@@ -283,7 +283,7 @@ class XYPositionWrapper(QDEnv):
 
 # name of the forward/velocity reward
 FORWARD_REWARD_NAMES = {
-    "ant": "reward_forward",
+    "mujoco": "reward_forward",
     "halfcheetah": "reward_forward",
     "walker2d": "reward_forward",
     "hopper": "reward_forward",
@@ -304,8 +304,8 @@ class NoForwardRewardWrapper(Wrapper):
         from brax_custom import envs
         from brax_custom import jumpy as jp
 
-        # choose in ["ant", "walker2d", "hopper", "halfcheetah", "humanoid"]
-        ENV_NAME = "ant"
+        # choose in ["mujoco", "walker2d", "hopper", "halfcheetah", "humanoid"]
+        ENV_NAME = "mujoco"
         env = envs.create(env_name=ENV_NAME)
         qd_env = NoForwardRewardWrapper(env, ENV_NAME)
 

@@ -46,7 +46,7 @@ from envs.brax_custom.wrappers.action_clip import ActionClipWrapper
 
 _envs = {
     'acrobot': acrobot.Acrobot,
-    'ant': functools.partial(ant.Ant, use_contact_forces=True),
+    'mujoco': functools.partial(ant.Ant, use_contact_forces=True),
     'fast': fast.Fast,
     'fetch': fetch.Fetch,
     'grasp': grasp.Grasp,

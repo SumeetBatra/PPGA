@@ -12,7 +12,8 @@ from models.actor_critic import ActorCriticShared, QDActorCriticShared, Actor
 from utils.normalize_obs import NormalizeReward, VecRewardNormalizer
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
-            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0, 'obs_dim': 28})
+            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0, 'obs_dim': 28,
+                     'obs_shape': (27,), 'action_shape': (8,), 'num_envs': 10})
 
 
 def test_vec_env():
@@ -194,12 +195,14 @@ def all_params_equal(model1, model2):
 def test_vectorized_to_list():
     '''Make sure the models_list() function returns the list of models to the exact
     same state they were passed in'''
-    obs_shape, action_shape = (8,), np.array(2)
-    models = [Agent(obs_shape, action_shape) for _ in range(10)]
-    vec_model = VectorizedPolicy(models, Agent, obs_shape=obs_shape, action_shape=action_shape)
-    models_returned = vec_model.models_list()
+    obs_shape, action_shape = TEST_CFG.obs_shape, TEST_CFG.action_shape
+    models = [Actor(TEST_CFG, obs_shape, action_shape) for _ in range(10)]
+    vec_model = VectorizedActor(TEST_CFG, models, Actor, obs_shape=obs_shape, action_shape=action_shape)
+    models_returned = vec_model.vec_to_models()
 
     for m_old, m_new in zip(models, models_returned):
+        m_old = m_old.cpu()
+        m_new = m_new.cpu()
         old_statedict, new_statedict = m_old.state_dict(), m_new.state_dict()
         assert validate_state_dicts(old_statedict, new_statedict), "Error: State dicts for original model and model" \
                                                                    " returned by the vectorized model are not the same"
