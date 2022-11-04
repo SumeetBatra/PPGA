@@ -55,11 +55,11 @@ class PPO:
         else:
             # brax env
             multi_eval_cfg = copy.deepcopy(cfg)
-            multi_eval_cfg.env_batch_size = 1000
+            multi_eval_cfg.env_batch_size = 1200
             self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
 
             # metrics for logging
-        self.metric_last_n_window = 10
+        self.metric_last_n_window = 50
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
         self.episodic_returns.append(0)
         self._report_interval = cfg.report_interval
@@ -245,7 +245,7 @@ class PPO:
                 self.actions[step] = action
                 self.logprobs[step] = logprob
 
-                self.next_obs, reward, self.next_done, infos = self.vec_env.step(action.cpu().numpy())
+                self.next_obs, reward, self.next_done, infos = self.vec_env.step(action)
                 measures = infos['measures']
                 self.measures[step] = measures
                 reward = reward.cpu()

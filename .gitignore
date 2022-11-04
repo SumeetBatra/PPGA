@@ -13,3 +13,4 @@ wandb/
 logs/
 dask-worker-space/
 RL/.ipynb_checkpoints/
+video*
