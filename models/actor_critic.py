@@ -176,26 +176,20 @@ class Critic(nn.Module):
         core_out = self.core(obs)
         return self.critic(core_out)
 
-    def forward(self, obs):
-        return self.get_value(obs)
-
 
 class QDCritic2(nn.Module):
-    def __init__(self, obs_shape, measure_dim, critics_list: List[nn.Module] = None):
+    def __init__(self, obs_shape, measure_dim):
         super(QDCritic2, self).__init__()
         self.measure_dim = measure_dim
-        if critics_list is None:
-            self.all_critics = nn.ModuleList([
-                nn.Sequential(
-                    layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
-                    nn.Tanh(),
-                    layer_init(nn.Linear(64, 64)),
-                    nn.Tanh(),
-                    layer_init(nn.Linear(64, 1), std=1.0)
-                ) for _ in range(measure_dim + 1)
-            ])
-        else:
-            self.all_critics = nn.ModuleList(critics_list)
+        self.all_critics = nn.ModuleList([
+            nn.Sequential(
+                layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 64)),
+                nn.Tanh(),
+                layer_init(nn.Linear(64, 1), std=1.0)
+            ) for _ in range(measure_dim + 1)
+        ])
 
     def get_value_at(self, obs, dim):
         return self.all_critics[dim](obs)
@@ -225,6 +219,7 @@ class QDCritic(Critic):
         core_out = self.core(obs)
         return self.measure_critics[dim](core_out)
 
+
     def get_obj_and_measure_values(self, obs):
         core_out = self.core(obs)
         obj_val = self.critic(core_out)
@@ -233,25 +228,3 @@ class QDCritic(Critic):
             measure_vals.append(critic(core_out))
         measure_vals = torch.cat(measure_vals).reshape(-1, self.measure_dim).to(obj_val.device)
         return obj_val, measure_vals
-
-
-class QDMeasureCritic(nn.Module):
-    '''
-    QD Critic with measure_critic heads and conditioned on measure coefficients
-    '''
-    def __init__(self, obs_shape, measure_dim):
-        super().__init__()
-        # re-write the core layers to include measure coeffs
-        self.core = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod() + measure_dim + 1, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0)
-        )
-
-    def get_value(self, obs):
-        return self.core(obs)
-
-    def forward(self, obs):
-        return self.core(obs)

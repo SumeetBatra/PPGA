@@ -14,6 +14,8 @@ _to_custom_env = {
             'action_clip': (-1, 1)},
     'humanoid': {'custom_env_name': 'brax_custom-humanoid-v0',
                  'action_clip': (-1, 1)},
+    'walker2d': {'custom_env_name': 'brax-custom-walker2d-v0',
+                 'action_clip': (-1, 1)}
 }
 
 
