@@ -13,7 +13,7 @@ from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
 from envs.brax_custom.gpu_env import make_vec_env_brax
 from utils.utils import log, save_checkpoint
 from models.vectorized import VectorizedActor
-from models.actor_critic import Actor, Critic, QDCritic, QDCritic2, QDMeasureCritic
+from models.actor_critic import Actor, Critic, QDCritic, QDCritic2
 
 
 # based off of the clean-rl implementation
