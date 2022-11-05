@@ -21,9 +21,17 @@ BoxStyle._style_list["myrarrow"] = MyRArrow
 if __name__ == '__main__':
     measures = [0.2, -0.5]
     fig = plt.figure(figsize=(8, 6))
-    ax = plt.axes([0, 0, 1, 1])
+    ax = plt.gca()
+    # ax.set_xlim(0, 1)
+    # ax.set_ylim(0, 1)
     plt.plot(list(range(10)), list(range(10)))
+    plt.axis('equal')
+    circle = plt.Circle((9, 9), 0.1, facecolor='r', antialiased=True, rasterized=True, edgecolor='b', linewidth=1.0)
+    ax.add_patch(circle)
     # x axis arrow
-    plt.quiver(4, -1.0, 4, 0, scale=8, width=0.02)  # scale 8 to 20
+    plt.quiver(4, -1.0, -1 * 4, 0, scale=50, width=0.015, headlength=4.5, color='r')
+    # y axis arrow
+    plt.quiver(-1.0, 4.0, 0.0, 1 * 4.0, scale=50, width=0.01, headlength=4.5, color='r')
+    plt.tight_layout()
     plt.show()
 
