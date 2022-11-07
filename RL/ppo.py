@@ -415,12 +415,15 @@ class PPO:
         '''
 
         total_reward = np.zeros(vec_env.num_envs)
-        measures = torch.zeros(vec_env.num_envs, self.cfg.num_dims).to(self.device)
         traj_length = 0
+        num_steps = 1000
 
         obs = vec_env.reset()
         obs = obs.to(self.device)
         dones = torch.BoolTensor([False for _ in range(vec_env.num_envs)])
+        all_dones = torch.zeros((num_steps, vec_env.num_envs)).to(self.device)
+        measures_acc = torch.zeros((num_steps, vec_env.num_envs, self.cfg.num_dims)).to(self.device)
+        measures = torch.zeros((vec_env.num_envs, self.cfg.num_dims)).to(self.device)
 
         if self.cfg.normalize_obs:
             obs_mean = self.vec_inference.obs_normalizer.obs_rms.mean.to(self.device)
@@ -432,14 +435,19 @@ class PPO:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
                 obs, rew, next_dones, infos = vec_env.step(acts)
-                traj_length += 1
-                measures += infos['measures']  # TODO: should this be truncated?
+                measures_acc[traj_length] = infos['measures']
                 obs = obs.to(self.device)
                 total_reward += rew.detach().cpu().numpy() * ~dones.cpu().numpy()
                 dones = torch.logical_or(dones, next_dones.cpu())
+                all_dones[traj_length] = dones.long().clone()
+                traj_length += 1
 
-        # get the final measures
-        measures = measures / traj_length
+
+        # the first done in each env is where that trajectory ends
+        traj_lengths = torch.argmax(all_dones, dim=0)
+        # TODO: figure out how to vectorize this
+        for i in range(vec_env.num_envs):
+            measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
         measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
 
         max_reward = np.max(total_reward)
