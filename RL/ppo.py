@@ -248,7 +248,7 @@ class PPO:
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
-    def train(self, num_updates, rollout_length, dqd=False, apply_grad_coeffs=False):
+    def train(self, num_updates, rollout_length, dqd=False, apply_grad_coeffs=False, negative_measure_gradients=False):
         global_step = 0
 
         if dqd:
@@ -289,7 +289,7 @@ class PPO:
                 self.logprobs[step] = logprob
 
                 self.next_obs, reward, self.next_done, infos = self.vec_env.step(action)
-                measures = -infos['measures']
+                measures = -infos['measures'] if negative_measure_gradients else infos['measures']
                 self.measures[step] = measures
                 if apply_grad_coeffs:
                     with torch.no_grad():
