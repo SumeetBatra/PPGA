@@ -450,11 +450,11 @@ class PPO:
             measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
         measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
 
+        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
+        total_reward = total_reward.mean(axis=1)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)
-        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
-        total_reward = total_reward.mean(axis=1)
 
         # traj_lengths = infos['traj_length']
 
