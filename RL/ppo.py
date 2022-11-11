@@ -30,16 +30,16 @@ class PPO:
         agent = Actor(cfg, self.obs_shape, self.action_shape).to(self.device)
         self._agents = [agent]
         critic = QDCritic2(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
-        self._critic = critic
+        self.qd_critic = critic
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
         self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
-        self.critic_optimizer = torch.optim.Adam(self._critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
         # critic for moving the mean solution point
-        self.qd_critic = Critic(self.obs_shape).to(self.device)
-        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self.mean_critic = Critic(self.obs_shape).to(self.device)
+        self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
 
         # # single policy eval env
         # single_eval_cfg = copy.deepcopy(cfg)
@@ -127,23 +127,23 @@ class PPO:
         self._grad_coeffs = coeffs
 
     def update_critics(self, critics_list: List[Critic]):
-        self._critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(self.device)
-        self.critic_optimizer = torch.optim.Adam(self._critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+        self.qd_critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(self.device)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
-    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False, apply_grad_coeffs=False):
+    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False, move_mean_agent=False):
         # bootstrap value if not done
         with torch.no_grad():
             if dqd:
                 next_obs = next_obs.reshape(self.cfg.num_dims + 1, self.cfg.num_envs // (self.cfg.num_dims + 1), -1)
                 next_value = []
                 for i, obs, in enumerate(next_obs):
-                    next_value.append(self._critic.get_value_at(obs, dim=i))
+                    next_value.append(self.qd_critic.get_value_at(obs, dim=i))
                 next_value = torch.cat(next_value).reshape(1, -1).to(self.device)
-            elif apply_grad_coeffs:
-                next_value = self.qd_critic.get_value(next_obs).reshape(1, -1).to(self.device)
+            elif move_mean_agent:
+                next_value = self.mean_critic.get_value(next_obs).reshape(1, -1).to(self.device)
             else:
                 # standard ppo
-                next_value = self._critic.get_value(next_obs).reshape(1, -1).to(self.device)
+                next_value = self.qd_critic.get_value(next_obs).reshape(1, -1).to(self.device)
             # assume we use gae
             advantages = torch.zeros_like(rewards).to(self.device)
             lastgaelam = 0
@@ -164,7 +164,7 @@ class PPO:
             returns = advantages + values
         return advantages, returns
 
-    def batch_update(self, values, batched_data, dqd=False, apply_grad_coeffs=False):
+    def batch_update(self, values, batched_data, dqd=False, move_mean_agent=False):
         b_values = values
         (b_obs, b_logprobs, b_actions, b_advantages, b_returns) = batched_data
         batch_size = b_obs.shape[1]
@@ -185,13 +185,13 @@ class PPO:
                 if dqd:
                     newvalue = []
                     for i in range(self.cfg.num_dims + 1):
-                        newvalue.append(self._critic.get_value_at(b_obs[i, mb_inds], dim=i))
+                        newvalue.append(self.qd_critic.get_value_at(b_obs[i, mb_inds], dim=i))
                     newvalue = torch.cat(newvalue).to(self.device)
-                elif apply_grad_coeffs:
-                    newvalue = self.qd_critic.get_value(b_obs[:, mb_inds].reshape(-1, obs_dim))
+                elif move_mean_agent:
+                    newvalue = self.mean_critic.get_value(b_obs[:, mb_inds].reshape(-1, obs_dim))
                 else:
                     # standard ppo
-                    newvalue = self._critic.get_value(b_obs[:, mb_inds].reshape(-1, obs_dim))
+                    newvalue = self.qd_critic.get_value(b_obs[:, mb_inds].reshape(-1, obs_dim))
 
                 logratio = newlogprob - b_logprobs[:, mb_inds].flatten()
                 ratio = logratio.exp()
@@ -230,17 +230,17 @@ class PPO:
                 loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
 
                 self.vec_optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
+                self.qd_critic_optim.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.vec_inference.parameters(), self.cfg.max_grad_norm)
                 self.vec_optimizer.step()
-                if apply_grad_coeffs:
-                    nn.utils.clip_grad_norm_(self.qd_critic.parameters(), self.cfg.max_grad_norm)
-                    self.qd_critic_optim.step()
+                if move_mean_agent:
+                    nn.utils.clip_grad_norm_(self.mean_critic.parameters(), self.cfg.max_grad_norm)
+                    self.mean_critic_optim.step()
                 else:
                     # works for standard ppo or the dqd step
-                    nn.utils.clip_grad_norm_(self._critic.parameters(), self.cfg.max_grad_norm)
-                    self.critic_optimizer.step()
+                    nn.utils.clip_grad_norm_(self.qd_critic.parameters(), self.cfg.max_grad_norm)
+                    self.qd_critic_optim.step()
 
             if self.cfg.target_kl is not None:
                 if approx_kl > self.cfg.target_kl:
@@ -248,7 +248,7 @@ class PPO:
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
-    def train(self, num_updates, rollout_length, dqd=False, apply_grad_coeffs=False, negative_measure_gradients=False):
+    def train(self, num_updates, rollout_length, dqd=False, move_mean_agent=False, negative_measure_gradients=False):
         global_step = 0
 
         if dqd:
@@ -277,13 +277,13 @@ class PPO:
                         next_obs = self.next_obs.reshape(num_agents, self.cfg.num_envs // num_agents, -1)
                         value = []
                         for i, obs in enumerate(next_obs):
-                            value.append(self._critic.get_value_at(obs, i))
+                            value.append(self.qd_critic.get_value_at(obs, i))
                         value = torch.cat(value).reshape(-1).to(self.device)
-                    elif apply_grad_coeffs:
-                        value = self.qd_critic.get_value(self.next_obs)
+                    elif move_mean_agent:
+                        value = self.mean_critic.get_value(self.next_obs)
                     else:
                         # standard ppo. Maintains backwards compatibility
-                        value = self._critic.get_value(self.next_obs)
+                        value = self.qd_critic.get_value(self.next_obs)
                 self.values[step] = value.flatten()
                 self.actions[step] = action
                 self.logprobs[step] = logprob
@@ -291,7 +291,7 @@ class PPO:
                 self.next_obs, reward, self.next_done, infos = self.vec_env.step(action)
                 measures = -infos['measures'] if negative_measure_gradients else infos['measures']
                 self.measures[step] = measures
-                if apply_grad_coeffs:
+                if move_mean_agent:
                     with torch.no_grad():
                         rew_measures = torch.cat((reward.unsqueeze(1), measures), dim=1)
                         rew_measures *= self._grad_coeffs
@@ -303,7 +303,7 @@ class PPO:
                     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
                 self.rewards[step] = reward.squeeze()
 
-                if not dqd and not apply_grad_coeffs:
+                if not dqd and not move_mean_agent:
                     # TODO: move this to a separate process
                     if self.num_intervals % self._report_interval == 0:
                         for i, done in enumerate(self.next_done.flatten()):
@@ -326,12 +326,10 @@ class PPO:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, rew_measures,
                                                              self.values, self.dones,
                                                              rollout_length=rollout_length, dqd=True)
-                # returns = torch.cat((returns.unsqueeze(dim=2), self.measures), dim=2)
-                # returns = (returns * mask).sum(dim=2)
             else:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
                                                              self.dones, rollout_length=rollout_length,
-                                                             apply_grad_coeffs=apply_grad_coeffs)
+                                                             move_mean_agent=move_mean_agent)
             # flatten the batch
             b_obs = self.obs.transpose(0, 1).reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
             b_logprobs = self.logprobs.transpose(0, 1).reshape(num_agents, -1)
@@ -348,7 +346,7 @@ class PPO:
                                                                                                       b_advantages,
                                                                                                       b_returns),
                                                                                                      dqd=dqd,
-                                                                                                     apply_grad_coeffs=apply_grad_coeffs)
+                                                                                                     move_mean_agent=move_mean_agent)
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -361,7 +359,7 @@ class PPO:
                 wandb.log({
                     "charts/actor_avg_logstd": avg_log_stddev,
                     "charts/average_rew_magnitude": avg_obj_magnitude,
-                    "losses/value_loss": v_loss.item(),
+                    f"losses/{move_mean_agent=}/value_loss": v_loss.item(),
                     "losses/policy_loss": pg_loss.item(),
                     "losses/entropy": entropy_loss.item(),
                     "losses/old_approx_kl": old_approx_kl.item(),
@@ -382,7 +380,7 @@ class PPO:
         log.debug(f'FPS: {fps:.2f}')
         if self.cfg.use_wandb:
             wandb.log({'FPS: ': fps})
-        if not dqd and not apply_grad_coeffs:
+        if not dqd and not move_mean_agent:
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):

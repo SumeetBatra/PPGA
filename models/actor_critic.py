@@ -189,7 +189,9 @@ class QDCritic2(nn.Module):
                 nn.Sequential(
                     layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
                     nn.Tanh(),
-                    layer_init(nn.Linear(64, 64)),
+                    layer_init(nn.Linear(64, 128)),
+                    nn.Tanh(),
+                    layer_init(nn.Linear(128, 64)),
                     nn.Tanh(),
                     layer_init(nn.Linear(64, 1), std=1.0)
                 ) for _ in range(measure_dim + 1)
