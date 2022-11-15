@@ -384,7 +384,7 @@ class PPO:
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):
-                save_checkpoint('checkpoints', f'{self.cfg.env_name}_brax_model_{i}_checkpoint_debug',
+                save_checkpoint('checkpoints', f'{self.cfg.env_name}_brax_model_{i}_checkpoint',
                                 trained_models[i],
                                 self.vec_optimizer)
             # self.vec_env.stop.emit()
