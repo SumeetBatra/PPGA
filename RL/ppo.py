@@ -31,13 +31,13 @@ class PPO:
         self.qd_critic = critic
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
-        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
-        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5, weight_decay=cfg.weight_decay)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5, weight_decay=cfg.weight_decay)
         self.cfg = cfg
 
         # critic for moving the mean solution point
         self.mean_critic = Critic(self.obs_shape).to(self.device)
-        self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5, weight_decay=cfg.weight_decay)
 
         # # single policy eval env
         # single_eval_cfg = copy.deepcopy(cfg)
@@ -108,7 +108,7 @@ class PPO:
         self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
                                              obs_shape=self.obs_shape,
                                              action_shape=self.action_shape)
-        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=self.cfg.learning_rate, eps=1e-5, weight_decay=self.cfg.weight_decay)
 
     @property
     def grad_coeffs(self):
@@ -125,7 +125,7 @@ class PPO:
 
     def update_critics(self, critics_list: List[Critic]):
         self.qd_critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(self.device)
-        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5, weight_decay=self.cfg.weight_decay)
 
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False, move_mean_agent=False):
         # bootstrap value if not done
