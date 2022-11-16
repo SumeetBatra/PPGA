@@ -1,13 +1,10 @@
 import argparse
 import sys
-import numpy as np
-
+# from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
 from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utils import config_wandb, log
 from RL.ppo import PPO
-from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
-from envs.brax_custom.gpu_env import make_vec_env_brax
 
 
 def parse_args():
@@ -25,7 +22,7 @@ def parse_args():
 
     # algorithm args
     parser.add_argument('--total_timesteps', type=int, default=1000000)
-    parser.add_argument('--env_type', type=str, choices=['cpu', 'brax'], help='Whether to use cpu-envs or gpu-envs for rollouts')
+    parser.add_argument('--env_type', type=str, choices=['brax', 'isaac'], help='Whether to use cpu-envs or gpu-envs for rollouts')
     # args for brax
     parser.add_argument('--env_batch_size', default=1, type=int, help='Number of parallel environments to run')
 
@@ -82,19 +79,17 @@ def parse_args():
 if __name__ == '__main__':
     cfg = parse_args()
 
-    if cfg.env_type == 'cpu':
-        vec_env = make_vec_env(cfg)
-        cfg.batch_size = int(cfg.num_workers * cfg.envs_per_worker * cfg.rollout_length)
-        cfg.num_envs = int(cfg.num_workers * cfg.envs_per_worker)
-        cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
-    elif cfg.env_type == 'brax':
+    if cfg.env_type == 'brax':
+        from envs.brax_custom.brax_env import make_vec_env_brax
         vec_env = make_vec_env_brax(cfg)
-        cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
-        cfg.num_envs = int(cfg.env_batch_size)
-        cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
+    elif cfg.env_type == 'isaac':
+        vec_env = make_vec_env_isaac(cfg)
     else:
         raise NotImplementedError(f'{cfg.env_type} is undefined for "env_type"')
 
+    cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
+    cfg.num_envs = int(cfg.env_batch_size)
+    cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
     cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
     cfg.obs_shape = vec_env.single_observation_space.shape
     cfg.action_shape = vec_env.single_action_space.shape

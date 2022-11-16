@@ -9,7 +9,3 @@ def register(id, *args, **kwargs):
         return gym.envs.registration.register(id, *args, **kwargs)
 
 
-register(id='QDLunarLanderContinuous-v2',
-         entry_point='envs.qd_lunar_lander:QDLunarLanderEnv',
-         max_episode_steps=1000,
-         reward_threshold=500.0)

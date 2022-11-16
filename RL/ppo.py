@@ -9,8 +9,6 @@ import time
 import torch.nn as nn
 import wandb
 from collections import deque
-from envs.cpu.vec_env import make_vec_env, make_vec_env_for_eval
-from envs.brax_custom.gpu_env import make_vec_env_brax
 from utils.utils import log, save_checkpoint
 from models.vectorized import VectorizedActor
 from models.actor_critic import Actor, Critic, QDCritic, QDCritic2
@@ -50,19 +48,18 @@ class PPO:
         #                                              envs_per_worker=single_eval_cfg.envs_per_worker)
         #
 
-        # multi-policy eval
-        if cfg.env_type == 'cpu':
-            multi_eval_cfg = copy.deepcopy(cfg)
-            multi_eval_cfg.num_workers = cfg.mega_lambda
-            multi_eval_cfg.envs_per_worker = 4
-            multi_eval_cfg.envs_per_model = 4
-            self.multi_eval_env = make_vec_env_for_eval(multi_eval_cfg, num_workers=multi_eval_cfg.num_workers,
-                                                        envs_per_worker=multi_eval_cfg.envs_per_worker)
-        else:
+        if cfg.env_type == 'brax':
             # brax env
+            from envs.brax_custom.brax_env import make_vec_env_brax
             multi_eval_cfg = copy.deepcopy(cfg)
             multi_eval_cfg.env_batch_size = 1200
             self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
+        elif cfg.env_type == 'isaac':
+            # isaacgym
+            from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
+            multi_eval_cfg = copy.deepcopy(cfg)
+            multi_eval_cfg.env_batch_size = 1200
+            self.multi_eval_env = make_vec_env_isaac(multi_eval_cfg)
 
             # metrics for logging
         self.metric_last_n_window = 10
