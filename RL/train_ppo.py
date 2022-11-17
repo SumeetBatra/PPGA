@@ -1,6 +1,6 @@
 import argparse
 import sys
-# from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
+from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
 from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utils import config_wandb, log
