@@ -42,10 +42,12 @@ log.addHandler(fh)
 def config_wandb(**kwargs):
     # wandb initialization
     wandb.init(project='QDPPO', entity='sumeetb', group=kwargs['wandb_group'], name=kwargs['run_name'])
-    cfg = {}
-    for key, val in kwargs.items():
-        cfg[key] = val
-    wandb.config = cfg
+    cfg = kwargs.get('cfg', None)
+    if cfg is None:
+        cfg = {}
+        for key, val in kwargs.items():
+            cfg[key] = val
+    wandb.config.update(cfg)
 
 
 def save_checkpoint(cp_dir, cp_name, model, optimizer, **kwargs):
