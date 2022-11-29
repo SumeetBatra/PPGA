@@ -9,7 +9,7 @@ import time
 import torch.nn as nn
 import wandb
 from collections import deque
-from utils.utils import log, save_checkpoint
+from utils.utilities import log, save_checkpoint
 from models.vectorized import VectorizedActor
 from models.actor_critic import Actor, Critic, QDCritic, QDCritic2
 
@@ -31,13 +31,13 @@ class PPO:
         self.qd_critic = critic
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
-        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5, weight_decay=cfg.weight_decay)
-        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5, weight_decay=cfg.weight_decay)
+        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
 
         # critic for moving the mean solution point
         self.mean_critic = Critic(self.obs_shape).to(self.device)
-        self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5, weight_decay=cfg.weight_decay)
+        self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
 
         # # single policy eval env
         # single_eval_cfg = copy.deepcopy(cfg)
@@ -54,17 +54,16 @@ class PPO:
             multi_eval_cfg = copy.deepcopy(cfg)
             multi_eval_cfg.env_batch_size = 1200
             self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
-        elif cfg.env_type == 'isaac':
-            # isaacgym
-            from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
-            multi_eval_cfg = copy.deepcopy(cfg)
-            multi_eval_cfg.env_batch_size = 1200
-            self.multi_eval_env = make_vec_env_isaac(multi_eval_cfg)
+        # elif cfg.env_type == 'isaac':
+        #     # isaacgym
+        #     from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
+        #     multi_eval_cfg = copy.deepcopy(cfg)
+        #     multi_eval_cfg.env_batch_size = 1200
+        #     self.multi_eval_env = make_vec_env_isaac(multi_eval_cfg)
 
             # metrics for logging
         self.metric_last_n_window = 10
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
-        self.episodic_returns.append(0)
         self._report_interval = cfg.report_interval
         self.num_intervals = 0
         self.total_rewards = torch.zeros(self.vec_env.num_envs)
@@ -108,7 +107,7 @@ class PPO:
         self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
                                              obs_shape=self.obs_shape,
                                              action_shape=self.action_shape)
-        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=self.cfg.learning_rate, eps=1e-5, weight_decay=self.cfg.weight_decay)
+        self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
     @property
     def grad_coeffs(self):
@@ -125,7 +124,7 @@ class PPO:
 
     def update_critics(self, critics_list: List[Critic]):
         self.qd_critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(self.device)
-        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5, weight_decay=self.cfg.weight_decay)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False, move_mean_agent=False):
         # bootstrap value if not done
@@ -288,6 +287,8 @@ class PPO:
                 self.next_obs, reward, self.next_done, infos = self.vec_env.step(action)
                 measures = -infos['measures'] if negative_measure_gradients else infos['measures']
                 self.measures[step] = measures
+                # for Factory task
+                successes = infos.get('successes', None)
                 if move_mean_agent:
                     with torch.no_grad():
                         rew_measures = torch.cat((reward.unsqueeze(1), measures), dim=1)
@@ -363,13 +364,24 @@ class PPO:
                     "losses/approx_kl": approx_kl.item(),
                     "losses/clipfrac": np.mean(clipfracs),
                     "losses/explained_variance": explained_var,
-                    f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
                     "Env step": global_step,
                     "Update": update
                 })
 
-            if self.cfg.algorithm == 'qd-ppo':
-                log.debug(f"Finished PPO iteration {update}")
+                if len(self.episodic_returns):
+                    # only log if we have something to report
+                    wandb.log({
+                       f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
+                       "Env step": global_step,
+                       "Update": update
+                   })
+
+                if successes:
+                    wandb.log({
+                        'Successes': successes,
+                        "Env step": global_step,
+                        "Update": update
+                    })
 
         train_elapse = time.time() - train_start
         log.debug(f'train() took {train_elapse:.2f} seconds to complete')
@@ -381,7 +393,7 @@ class PPO:
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):
-                save_checkpoint('checkpoints', f'{self.cfg.env_name}_brax_model_{i}_checkpoint',
+                save_checkpoint('checkpoints', f'{self.cfg.env_name}_{self.cfg.env_type}_model_{i}_checkpoint',
                                 trained_models[i],
                                 self.vec_optimizer)
             # self.vec_env.stop.emit()

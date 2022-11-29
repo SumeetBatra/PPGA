@@ -1,6 +1,6 @@
 from attrdict import AttrDict
 from RL.ppo import *
-from utils.utils import log
+from utils.utilities import log
 from envs.cpu.env import make_env
 from envs.brax_custom.gpu_env import make_vec_env_brax
 from models.actor_critic import Actor

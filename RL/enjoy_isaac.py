@@ -36,11 +36,15 @@ def enjoy(cfg, render=False):
 
     obs_shape = env.obs_space.shape
     action_shape = env.action_space.shape
+    cfg.obs_shape = obs_shape
 
     model_state_dict = torch.load(cfg.model_path)['model_state_dict']
     model_state_dict['actor_logstd'] = model_state_dict['actor_logstd'].reshape(1, -1)
     agent = Actor(cfg, obs_shape, action_shape).to(device)
     agent.load_state_dict(model_state_dict)
+
+    if cfg.normalize_obs:
+        obs_mean, obs_var = agent.obs_normalizer.obs_rms.mean, agent.obs_normalizer.obs_rms.var
 
     obs = env.reset()
     total_reward = 0
@@ -49,7 +53,10 @@ def enjoy(cfg, render=False):
         if render:
             env.render()
         with torch.no_grad():
-            act, _, _ = agent.get_action(obs['obs'])
+            obs = obs['obs']
+            if cfg.normalize_obs:
+                obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
+            act, _, _ = agent.get_action(obs)
             obs, rew, done, info = env.step(act)
             total_reward += rew
     print(f'{total_reward=}')
