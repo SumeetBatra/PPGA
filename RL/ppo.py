@@ -96,6 +96,7 @@ class PPO:
         self._grad_coeffs[0] = 1.0  # default grad coefficients optimizes objective only
         self.obs_measure_coeffs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs,
                                                self.vec_env.single_observation_space.shape[0] + self.cfg.num_dims + 1)).to(self.device)
+        self._solution_batch = None
 
     @property
     def agents(self):
@@ -159,6 +160,13 @@ class PPO:
                     delta + self.cfg.gamma * self.cfg.gae_lambda * is_next_nonterminal * lastgaelam
             returns = advantages + values
         return advantages, returns
+
+    def discounted_rewards(self, rewards, episode_length):
+        discounted_rews = np.zeros_like(rewards)
+        last_delta = 0
+        for t in reversed(range(0, episode_length)):
+            discounted_rews[t] = last_delta = rewards[t] + self.cfg.gamma * last_delta
+        return discounted_rews[0]
 
     def batch_update(self, values, batched_data, dqd=False, move_mean_agent=False):
         b_values = values
@@ -233,6 +241,8 @@ class PPO:
                 if move_mean_agent:
                     nn.utils.clip_grad_norm_(self.mean_critic.parameters(), self.cfg.max_grad_norm)
                     self.mean_critic_optim.step()
+                    # every gradient update produces a new model, which can be potentially added to the archive
+                    self._solution_batch.append(self.vec_inference.vec_to_models()[0].serialize())
                 else:
                     # works for standard ppo or the dqd step
                     nn.utils.clip_grad_norm_(self.qd_critic.parameters(), self.cfg.max_grad_norm)
@@ -255,6 +265,9 @@ class PPO:
             agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(params) for params in
                       agent_original_params]
             self.agents = agents
+
+        if move_mean_agent:
+            self._solution_batch = []
 
         num_agents = len(self._agents)
 
@@ -409,12 +422,16 @@ class PPO:
             self.vec_inference = VectorizedActor(self.cfg, original_agent, Actor,
                                                  obs_shape=self.obs_shape,
                                                  action_shape=self.action_shape)
-            f, m = self.evaluate(self.vec_inference, self.multi_eval_env)
+            f, m, metadata = self.evaluate(self.vec_inference, self.multi_eval_env)
             return f.reshape(self.vec_inference.num_models, ), \
                    m.reshape(self.vec_inference.num_models, -1), \
-                   jacobian
+                   jacobian, \
+                   metadata
+        else:
+            # move_mean_agent is true
+            return self._solution_batch
 
-    def evaluate(self, vec_agent, vec_env):
+    def evaluate(self, vec_agent, vec_env, verbose=True):
         '''
         Evaluate all agents for one episode
         :param vec_agent: Vectorized agents for vectorized inference
@@ -451,26 +468,24 @@ class PPO:
 
 
         # the first done in each env is where that trajectory ends
-        traj_lengths = torch.argmax(all_dones, dim=0)
+        traj_lengths = torch.argmax(all_dones, dim=0) + 1
         # TODO: figure out how to vectorize this
         for i in range(vec_env.num_envs):
             measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
         measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
 
-        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models))
-        total_reward = total_reward.mean(axis=1)
+        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).mean(axis=1)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)
 
-        # traj_lengths = infos['traj_length']
-
-        log.debug('Finished Evaluation Step')
-        log.info(f'BC on eval: {measures}')
-        log.info(f'Rewards on eval: {total_reward}')
-        log.info(f'Max Reward on eval: {max_reward}')
-        log.info(f'Min Reward on eval: {min_reward}')
-        log.info(f'Mean Reward across all agents: {mean_reward}')
+        if verbose:
+            log.debug('Finished Evaluation Step')
+            log.info(f'BC on eval: {measures}')
+            log.info(f'Rewards on eval: {total_reward}')
+            log.info(f'Max Reward on eval: {max_reward}')
+            log.info(f'Min Reward on eval: {min_reward}')
+            log.info(f'Mean Reward across all agents: {mean_reward}')
         # log.info(f'{traj_lengths=}')
 
-        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims).detach().cpu().numpy()
+        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims).detach().cpu().numpy(), {}
