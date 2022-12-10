@@ -1,6 +1,5 @@
 import argparse
 import sys
-# from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
 from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utilities import config_wandb, log
@@ -71,6 +70,7 @@ def parse_args():
     parser.add_argument('--pretrain', type=lambda x: bool(strtobool(x)), default=False, help='Pretrain a policy with PPO as the initial solution point for DQD')
     parser.add_argument('--total_iterations', type=int, default=100, help='Number of iterations to run the entire dqd-rl loop')
     parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'], help='Which DQD algorithm should be running in the outer loop')
+    parser.add_argument('--logdir', type=str, help='Experiment results directory')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -83,8 +83,6 @@ if __name__ == '__main__':
     if cfg.env_type == 'brax':
         from envs.brax_custom.brax_env import make_vec_env_brax
         vec_env = make_vec_env_brax(cfg)
-    elif cfg.env_type == 'isaac':
-        vec_env = make_vec_env_isaac(cfg)
     else:
         raise NotImplementedError(f'{cfg.env_type} is undefined for "env_type"')
 
