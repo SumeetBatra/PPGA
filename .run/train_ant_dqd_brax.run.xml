@@ -1,0 +1,24 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="train_ant_dqd_brax" type="PythonConfigurationType" factoryName="Python">
+    <module name="QDPPO" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="PYTHONUNBUFFERED" value="1" />
+    </envs>
+    <option name="SDK_HOME" value="" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />
+    <option name="IS_MODULE_SDK" value="true" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/pyribs/experiments/ant/train_mujoco_dqdrl.py" />
+    <option name="PARAMETERS" value="--env_name=ant --algorithm=qd-ppo --rollout_length=128 --use_wandb=True --wandb_group=QDPPO --num_dims=4 --num_minibatches=8 --update_epochs=4 --normalize_obs=False --normalize_rewards=True --wandb_run_name=method3_ant_pycma_debug --mega_lambda=200 --env_type=brax --env_batch_size=4000 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --dqd_lr=0.01 --pretrain=True --total_iterations=1000 --dqd_algorithm=cma_maega --logdir=./logs/method3_ant_pycma_cma_12_01/" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="false" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>
