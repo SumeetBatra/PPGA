@@ -6,9 +6,9 @@ import random
 from attrdict import AttrDict
 from time import time
 from envs.cpu.vec_env import make_vec_env, make_env
-from utils.utils import log
+from utils.utilities import log
 from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, VectorizedLinearBlock, VectorizedActor
-from models.actor_critic import ActorCriticShared, QDActorCriticShared, Actor
+from models.actor_critic import Actor
 from utils.normalize_obs import NormalizeReward, VecRewardNormalizer
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
@@ -217,8 +217,8 @@ def test_qdvec_to_list():
     cfg = {'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
            'envs_per_model': 1, 'num_dims': 3}
     cfg = AttrDict(cfg)
-    models = [QDActorCriticShared(cfg, obs_shape, action_shape, num_dims=3) for _ in range(10)]
-    vec_model = QDVectorizedActorCriticShared(cfg, models, QDActorCriticShared, measure_dims=3, obs_shape=obs_shape,
+    models = [Actor(cfg, obs_shape, action_shape, num_dims=3) for _ in range(10)]
+    vec_model = VectorizedActor(cfg, models, Actor, measure_dims=3, obs_shape=obs_shape,
                                               action_shape=action_shape)
 
     vec2models = vec_model.vec_to_models()
@@ -231,41 +231,6 @@ def test_qdvec_to_list():
         assert all_params_equal(m_orig.to(torch.device('cuda')),
                                 m_new), "Error: not all parameters are the same for the original and returned " \
                                         "model"
-
-
-def test_vectorized_actor_critic_shared_weights():
-    device = torch.device('cuda')
-    obs_shape, action_shape = (8,), np.array(2)
-    models = [ActorCriticShared(obs_shape, action_shape).to(device) for _ in range(10)]
-    vec_model = VectorizedActorCriticShared(models, ActorCriticShared, obs_shape=obs_shape, action_shape=action_shape)
-    obs = torch.randn((10, 8)).to(device)
-
-    acts_for_loop, vals_for_loop = [], []
-    for model, o in zip(models, obs):
-        act = model(o)
-        val = model.get_value(o)
-        acts_for_loop.append(act)
-        vals_for_loop.append(val)
-    acts_for_loop = torch.cat(acts_for_loop).flatten()
-    vals_for_loop = torch.cat(vals_for_loop).flatten()
-
-    acts_vec = vec_model(obs.to(device)).flatten()
-    vals_vec = vec_model.get_value(obs.to(device)).flatten()
-
-    assert torch.allclose(acts_vec, acts_for_loop)
-    assert torch.allclose(vals_vec, vals_for_loop)
-
-
-def test_policy_serialize_deserialize():
-    obs_shape, action_shape = (8,), np.array(2)
-    model1 = ActorCriticShared(obs_shape, action_shape)
-    model2 = ActorCriticShared(obs_shape, action_shape)
-
-    params1 = model1.serialize()
-    model2.deserialize(params1)
-
-    assert validate_state_dicts(model1.state_dict(), model2.state_dict())
-    assert all_params_equal(model1, model2)
 
 
 def test_vectorized_rew_normalizer():
@@ -306,4 +271,4 @@ def test_vectorized_rew_normalizer():
 
 
 if __name__ == '__main__':
-    try_vec_env()
+    pass
