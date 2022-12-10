@@ -9,6 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--image_folder', type=str)
     parser.add_argument('--video_name', type=str)
+    parser.add_argument('--fps', type=int)
     args = parser.parse_args()
     return AttrDict(vars(args))
 
@@ -20,7 +21,7 @@ if __name__ == '__main__':
     height, width, layers = frame.shape
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter(cfg.video_name, fourcc, 6, (width, height))
+    video = cv2.VideoWriter(cfg.video_name, fourcc, cfg.fps, (width, height))
 
     for image in images:
         print(image)
