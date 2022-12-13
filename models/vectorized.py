@@ -140,7 +140,7 @@ class VectorizedActor(VectorizedPolicy):
         self.actor_mean = nn.Sequential(*self.blocks)
         action_logprobs = [model.actor_logstd for model in models]
         action_logprobs = torch.cat(action_logprobs).to(self.device)
-        self.actor_logstd = action_logprobs
+        self.actor_logstd = nn.Parameter(action_logprobs)
 
     def forward(self, x):
         return self.actor_mean(x)

@@ -18,14 +18,14 @@ class Actor(StochasticPolicy):
         super().__init__(cfg)
 
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(obs_shape).prod(), 128)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(128, 128)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, np.prod(action_shape)), std=0.01),
+            layer_init(nn.Linear(128, np.prod(action_shape)), std=0.01),
         )
 
-        self.actor_logstd = torch.zeros(1, np.prod(action_shape))
+        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
 
     def forward(self, x):
         return self.actor_mean(x)
@@ -87,13 +87,13 @@ class Critic(nn.Module):
     def __init__(self, obs_shape):
         super().__init__()
         self.core = nn.Sequential(
-            layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+            layer_init(nn.Linear(np.array(obs_shape).prod(), 256)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init(nn.Linear(256, 256)),
             nn.Tanh(),
         )
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init(nn.Linear(256, 1), std=1.0),
         )
 
     def get_value(self, obs):
@@ -111,13 +111,11 @@ class QDCritic2(nn.Module):
         if critics_list is None:
             self.all_critics = nn.ModuleList([
                 nn.Sequential(
-                    layer_init(nn.Linear(np.array(obs_shape).prod(), 64)),
+                    layer_init(nn.Linear(np.array(obs_shape).prod(), 256)),
                     nn.Tanh(),
-                    layer_init(nn.Linear(64, 128)),
+                    layer_init(nn.Linear(256, 256)),
                     nn.Tanh(),
-                    layer_init(nn.Linear(128, 64)),
-                    nn.Tanh(),
-                    layer_init(nn.Linear(64, 1), std=1.0)
+                    layer_init(nn.Linear(256, 1), std=1.0)
                 ) for _ in range(measure_dim + 1)
             ])
         else:

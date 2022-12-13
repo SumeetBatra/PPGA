@@ -8,7 +8,7 @@ from attrdict import AttrDict
 from ribs.archives import CVTArchive, GridArchive
 from ribs.visualize import cvt_archive_heatmap, grid_archive_heatmap
 from typing import Optional
-from models.actor_critic import Actor
+from models.actor_critic import Actor, PGAMEActor
 from models.vectorized import VectorizedActor
 from envs.brax_custom.brax_env import make_vec_env_brax
 
@@ -50,7 +50,7 @@ def load_archive(archive_path):
     return archive
 
 
-def evaluate(vec_agent, vec_env, num_dims):
+def evaluate(vec_agent, vec_env, num_dims, deterministic=True):
     '''
     Evaluate all agents for one episode
     :param vec_agent: Vectorized agents for vectorized inference
@@ -71,8 +71,10 @@ def evaluate(vec_agent, vec_env, num_dims):
 
     while not torch.all(dones):
         with torch.no_grad():
-            # acts, _, _ = vec_agent.get_action(obs)
-            acts = vec_agent(obs)
+            if deterministic:
+                acts = vec_agent(obs)
+            else:
+                acts, _, _ = vec_agent.get_action(obs)
             obs, rew, next_dones, infos = vec_env.step(acts)
             measures_acc[traj_length] = infos['measures']
             obs = obs.to(device)
@@ -109,7 +111,7 @@ def reevaluate_archive(archive_df, env_cfg):
         agents.append(agent)
     vec_inference = VectorizedActor(cfg, agents, Actor, obs_shape=obs_shape, action_shape=action_shape).to(device)
     all_objs, all_measures = [], []
-    num_iters = 4
+    num_iters = 1
     for _ in range(num_iters):
         objs, measures = evaluate(vec_inference, vec_env, env_cfg.num_dims)
         all_objs.append(objs)
@@ -133,7 +135,7 @@ def reevaluate_archive(archive_df, env_cfg):
     )
 
     # save a heatmap of the new archive
-    experiment_dir = '/home/sbatra/QDPPO/logs/method3_walker2d_debug_pycma/cma_maega/trial_0'
+    experiment_dir = '/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0'
     analysis_dir = os.path.join(experiment_dir, 'post_hoc_analysis')
     if not os.path.exists(analysis_dir):
         os.mkdir(analysis_dir)
@@ -141,10 +143,54 @@ def reevaluate_archive(archive_df, env_cfg):
     save_heatmap(new_archive, heatmap_path)
 
 
-if __name__ == '__main__':
-    archive_path = '/home/sbatra/QDPPO/logs/method3_walker2d_debug_pycma/cma_maega/trial_0/checkpoints/cp_00002000/archive_00002000.pkl'
+def evaluate_pga_me_archive(checkpoint_dir):
+    '''
+    Convert a qdax checkpoint into a ribs archive
+    :param checkpoint_dir: directory to find the centroids, descriptors, and gentoypes files
+    '''
+    descriptors_fp = os.path.join(checkpoint_dir, 'descriptors.npy')
+    fitnesses_fp = os.path.join(checkpoint_dir, 'fitnesses.npy')
+    genotypes_fp = os.path.join(checkpoint_dir, 'genotypes.npy')
+
+    descriptors = np.load(descriptors_fp)
+    fitnesses = np.load(fitnesses_fp)
+    genotypes = np.load(genotypes_fp)
+
+    env_cfg = AttrDict({'env_name': 'walker2d', 'num_dims': 2, 'seed': 0})
+    env_cfg.env_batch_size = genotypes.shape[0]
+    vec_env = make_vec_env_brax(env_cfg)
+    obs_shape, action_shape = vec_env.single_observation_space.shape, vec_env.single_action_space.shape
+    device = torch.device('cuda')
+
+    agents = [PGAMEActor(obs_shape[0], action_shape).deserialize(genotype).to(device) for genotype in genotypes]
+    cfg = AttrDict(
+        {'normalize_obs': False, 'normalize_rewards': False, 'num_envs': genotypes.shape[0], 'num_dims': env_cfg.num_dims})
+    vec_agent = VectorizedActor(cfg, agents, PGAMEActor, obs_shape=obs_shape, action_shape=action_shape).to(device)
+    objs, measures = evaluate(vec_agent, vec_env, env_cfg.num_dims)
+
+    archive_dims = [100, 100]
+    bounds = [(0., 1.0) for _ in range(env_cfg.num_dims)]
+    archive = GridArchive(solution_dim=genotypes.shape[1],
+                          dims=archive_dims,
+                          ranges=bounds,
+                          threshold_min=0.0,
+                          seed=env_cfg.seed)
+    archive.add(genotypes, objs, measures)
+
+    analysis_dir = os.path.join(checkpoint_dir, 'post_hoc_analysis')
+    if not os.path.exists(analysis_dir):
+        os.mkdir(analysis_dir)
+    heatmap_path = os.path.join(analysis_dir, 'pga_me_no_autoreset_heatmap.png')
+    save_heatmap(archive, heatmap_path)
+
+
+def load_and_eval_archive(archive_path):
     archive_df = load_archive(archive_path)
     env_cfg = AttrDict({'env_name': 'walker2d', 'num_dims': 2, 'seed': 1111})
     reevaluate_archive(archive_df, env_cfg)
 
+
+if __name__ == '__main__':
+    evaluate_pga_me_archive('/home/sumeet/QDax/experiments/pga_me_reproduce/checkpoints/checkpoint_00729')
+    # load_and_eval_archive('/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0/checkpoints/cp_00000670/archive_00000670.pkl')
 
