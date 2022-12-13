@@ -25,7 +25,7 @@ class Actor(StochasticPolicy):
             layer_init(nn.Linear(64, np.prod(action_shape)), std=0.01),
         )
 
-        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(action_shape)))
+        self.actor_logstd = torch.zeros(1, np.prod(action_shape))
 
     def forward(self, x):
         return self.actor_mean(x)
@@ -38,6 +38,49 @@ class Actor(StochasticPolicy):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy()
+
+
+class PGAMEActor(nn.Module):
+    def __init__(self, obs_shape, action_shape):
+        super().__init__()
+        self.actor_mean = nn.Sequential(
+            nn.Linear(obs_shape, 128),
+            nn.Tanh(),
+            nn.Linear(128, 128),
+            nn.Tanh(),
+            nn.Linear(128, np.prod(action_shape)),
+            nn.Tanh()
+        )
+        self.actor_logstd = -100.0 * torch.ones(action_shape[0])
+
+    def forward(self, obs):
+        return self.network(obs)
+
+    def serialize(self):
+        '''
+        Returns a 1D numpy array view of the entire policy.
+        '''
+        return np.concatenate(
+            [p.data.cpu().detach().numpy().ravel() for p in self.parameters()])
+
+    def deserialize(self, array: np.ndarray):
+        '''
+        Update the weights of this policy with the weights from the 1D
+        array of parameters
+        '''
+        """Loads parameters from 1D array."""
+        array = np.copy(array)
+        arr_idx = 0
+        for param in self.parameters():
+            shape = tuple(param.data.shape)
+            length = np.product(shape)
+            block = array[arr_idx:arr_idx + length]
+            if len(block) != length:
+                raise ValueError("Array not long enough!")
+            block = np.reshape(block, shape)
+            arr_idx += length
+            param.data = torch.from_numpy(block).float()
+        return self
 
 
 class Critic(nn.Module):

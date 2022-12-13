@@ -40,9 +40,9 @@ from brax.envs import wrappers
 from brax.envs.env import Env, State, Wrapper
 import gym
 
-from envs.brax_custom.wrappers.locomotion_wrappers import FeetContactWrapper
-from envs.brax_custom.wrappers.reward import TotalReward
-from envs.brax_custom.wrappers.action_clip import ActionClipWrapper
+from envs.brax_custom.custom_wrappers.locomotion_wrappers import FeetContactWrapper
+from envs.brax_custom.custom_wrappers.reward import TotalReward
+from envs.brax_custom.custom_wrappers.action_clip import ActionClipWrapper
 
 _envs = {
     'acrobot': acrobot.Acrobot,
