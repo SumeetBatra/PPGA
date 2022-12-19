@@ -39,27 +39,12 @@ class PPO:
         self.mean_critic = Critic(self.obs_shape).to(self.device)
         self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
 
-        # # single policy eval env
-        # single_eval_cfg = copy.deepcopy(cfg)
-        # single_eval_cfg.num_workers = 4
-        # single_eval_cfg.envs_per_worker = 1
-        # single_eval_cfg.envs_per_model = 4
-        # self.single_eval_env = make_vec_env_for_eval(single_eval_cfg, num_workers=single_eval_cfg.num_workers,
-        #                                              envs_per_worker=single_eval_cfg.envs_per_worker)
-        #
-
         if cfg.env_type == 'brax':
             # brax env
             from envs.brax_custom.brax_env import make_vec_env_brax
             multi_eval_cfg = copy.deepcopy(cfg)
-            multi_eval_cfg.env_batch_size = 1200
+            multi_eval_cfg.env_batch_size = 2000
             self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
-        # elif cfg.env_type == 'isaac':
-        #     # isaacgym
-        #     from envs.IsaacGymEnvs.isaacgym_env import make_vec_env_isaac
-        #     multi_eval_cfg = copy.deepcopy(cfg)
-        #     multi_eval_cfg.env_batch_size = 1200
-        #     self.multi_eval_env = make_vec_env_isaac(multi_eval_cfg)
 
             # metrics for logging
         self.metric_last_n_window = 10
@@ -95,7 +80,8 @@ class PPO:
         self._grad_coeffs = torch.zeros(cfg.num_dims + 1).to(self.device)
         self._grad_coeffs[0] = 1.0  # default grad coefficients optimizes objective only
         self.obs_measure_coeffs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs,
-                                               self.vec_env.single_observation_space.shape[0] + self.cfg.num_dims + 1)).to(self.device)
+                                               self.vec_env.single_observation_space.shape[
+                                                   0] + self.cfg.num_dims + 1)).to(self.device)
         self._solution_batch = None
 
     @property
@@ -124,10 +110,12 @@ class PPO:
         self._grad_coeffs = coeffs
 
     def update_critics(self, critics_list: List[Critic]):
-        self.qd_critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(self.device)
+        self.qd_critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(
+            self.device)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
-    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False, move_mean_agent=False):
+    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False,
+                          move_mean_agent=False):
         # bootstrap value if not done
         with torch.no_grad():
             if dqd:
@@ -168,7 +156,7 @@ class PPO:
             discounted_rews[t] = last_delta = rewards[t] + self.cfg.gamma * last_delta
         return discounted_rews[0]
 
-    def batch_update(self, values, batched_data, dqd=False, move_mean_agent=False):
+    def batch_update(self, values, batched_data, calculate_dqd_gradients=False, move_mean_agent=False):
         b_values = values
         (b_obs, b_logprobs, b_actions, b_advantages, b_returns) = batched_data
         batch_size = b_obs.shape[1]
@@ -186,7 +174,7 @@ class PPO:
                 _, newlogprob, entropy = self.vec_inference.get_action(b_obs[:, mb_inds].reshape(-1, obs_dim),
                                                                        b_actions[:, mb_inds].reshape(-1, action_dim))
 
-                if dqd:
+                if calculate_dqd_gradients:
                     newvalue = []
                     for i in range(self.cfg.num_dims + 1):
                         newvalue.append(self.qd_critic.get_value_at(b_obs[i, mb_inds], dim=i))
@@ -254,10 +242,11 @@ class PPO:
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs
 
-    def train(self, num_updates, rollout_length, dqd=False, move_mean_agent=False, negative_measure_gradients=False):
+    def train(self, num_updates, rollout_length, calculate_dqd_gradients=False, move_mean_agent=False,
+              negative_measure_gradients=False):
         global_step = 0
 
-        if dqd:
+        if calculate_dqd_gradients:
             # TODO: make this work for multiple emitters
             solution_params = self._agents[0].serialize()
             # create copy of agent for f and one of each m
@@ -282,7 +271,7 @@ class PPO:
 
                 with torch.no_grad():
                     action, logprob, _ = self.vec_inference.get_action(self.next_obs)
-                    if dqd:
+                    if calculate_dqd_gradients:
                         next_obs = self.next_obs.reshape(num_agents, self.cfg.num_envs // num_agents, -1)
                         value = []
                         for i, obs in enumerate(next_obs):
@@ -300,8 +289,6 @@ class PPO:
                 self.next_obs, reward, self.next_done, infos = self.vec_env.step(action)
                 measures = -infos['measures'] if negative_measure_gradients else infos['measures']
                 self.measures[step] = measures
-                # for Factory task
-                successes = infos.get('successes', None)
                 if move_mean_agent:
                     with torch.no_grad():
                         rew_measures = torch.cat((reward.unsqueeze(1), measures), dim=1)
@@ -314,7 +301,7 @@ class PPO:
                     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
                 self.rewards[step] = reward.squeeze()
 
-                if not dqd and not move_mean_agent:
+                if not calculate_dqd_gradients and not move_mean_agent:
                     # TODO: move this to a separate process
                     if self.num_intervals % self._report_interval == 0:
                         for i, done in enumerate(self.next_done.flatten()):
@@ -325,7 +312,7 @@ class PPO:
                                 self.total_rewards[i] = 0
                     self.num_intervals += 1
 
-            if dqd:
+            if calculate_dqd_gradients:
                 with torch.no_grad():
                     envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
                     mask = torch.eye(self.cfg.num_dims + 1)
@@ -356,8 +343,8 @@ class PPO:
                                                                                                       b_actions,
                                                                                                       b_advantages,
                                                                                                       b_returns),
-                                                                                                     dqd=dqd,
-                                                                                                     move_mean_agent=move_mean_agent)
+                                                                                                      calculate_dqd_gradients=calculate_dqd_gradients,
+                                                                                                      move_mean_agent=move_mean_agent)
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -384,14 +371,7 @@ class PPO:
                 if len(self.episodic_returns):
                     # only log if we have something to report
                     wandb.log({
-                       f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
-                       "Env step": global_step,
-                       "Update": update
-                   })
-
-                if successes:
-                    wandb.log({
-                        'Successes': successes,
+                        f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
                         "Env step": global_step,
                         "Update": update
                     })
@@ -402,16 +382,16 @@ class PPO:
         log.debug(f'FPS: {fps:.2f}')
         if self.cfg.use_wandb:
             wandb.log({'FPS: ': fps})
-        if not dqd and not move_mean_agent:
+        if not calculate_dqd_gradients and not move_mean_agent:
+            # standard ppo
             log.debug("Saving checkpoint...")
             trained_models = self.vec_inference.vec_to_models()
             for i in range(num_agents):
                 save_checkpoint('checkpoints', f'{self.cfg.env_name}_{self.cfg.env_type}_model_{i}_checkpoint',
                                 trained_models[i],
                                 self.vec_optimizer)
-            # self.vec_env.stop.emit()
             log.debug("Done!")
-        elif dqd:
+        elif calculate_dqd_gradients:
             trained_agents = self.vec_inference.vec_to_models()
             new_params = np.array([agent.serialize() for agent in trained_agents])
             jacobian = (new_params - agent_original_params).reshape(self.cfg.num_emitters, self.cfg.num_dims + 1, -1)
@@ -424,11 +404,11 @@ class PPO:
                                                  action_shape=self.action_shape)
             f, m, metadata = self.evaluate(self.vec_inference, self.multi_eval_env)
             return f.reshape(self.vec_inference.num_models, ), \
-                   m.reshape(self.vec_inference.num_models, -1), \
-                   jacobian, \
-                   metadata
+                m.reshape(self.vec_inference.num_models, -1), \
+                jacobian, \
+                metadata
         else:
-            # move_mean_agent is true
+            # move_mean_agent
             return self._solution_batch
 
     def evaluate(self, vec_agent, vec_env, verbose=True):
@@ -466,7 +446,6 @@ class PPO:
                 all_dones[traj_length] = dones.long().clone()
                 traj_length += 1
 
-
         # the first done in each env is where that trajectory ends
         traj_lengths = torch.argmax(all_dones, dim=0) + 1
         # TODO: figure out how to vectorize this
@@ -474,18 +453,20 @@ class PPO:
             measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
         measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
 
-        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).mean(axis=1)
+        total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).mean(
+            axis=1)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)
+        mean_traj_length = torch.mean(traj_lengths.to(torch.float64)).detach().cpu().numpy().item()
 
         if verbose:
             log.debug('Finished Evaluation Step')
-            log.info(f'BC on eval: {measures}')
+            log.info(f'Measures on eval: {measures}')
             log.info(f'Rewards on eval: {total_reward}')
             log.info(f'Max Reward on eval: {max_reward}')
             log.info(f'Min Reward on eval: {min_reward}')
             log.info(f'Mean Reward across all agents: {mean_reward}')
-        # log.info(f'{traj_lengths=}')
+            log.info(f'Average Trajectory Length: {mean_traj_length}')
 
         return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims).detach().cpu().numpy(), {}

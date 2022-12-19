@@ -58,19 +58,6 @@ def parse_args():
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
-    # QD Params
-    parser.add_argument('--algorithm', type=str, choices=['ppo', 'qd-ppo'])
-    parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
-                                                                    " CMA-ES instances exploring the archive")
-    parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
-    parser.add_argument("--mega_lambda", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
-    parser.add_argument('--dqd_lr', type=float, default=0.001, help='Learning rate on gradient arborescence in DQD. Used in cma-mega, cma-maega, etc')
-    parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
-    parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
-    parser.add_argument('--pretrain', type=lambda x: bool(strtobool(x)), default=False, help='Pretrain a policy with PPO as the initial solution point for DQD')
-    parser.add_argument('--total_iterations', type=int, default=100, help='Number of iterations to run the entire dqd-rl loop')
-    parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'], help='Which DQD algorithm should be running in the outer loop')
-    parser.add_argument('--logdir', type=str, help='Experiment results directory')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
