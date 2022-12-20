@@ -2,10 +2,10 @@
 #SBATCH --gres=gpu:1
 #SBATCH -N1
 #SBATCH -n1
-#SBATCH -c32
+#SBATCH -c4
 #SBATCH --output=tmp/method3_walker2d_%j.log
 
-srun python -m pyribs.experiments.ant.train_mujoco_dqdrl \
+srun python -m algorithm.train_qdppo \
             --env_name=walker2d \
             --algorithm=qd-ppo \
             --seed=0000 \
@@ -28,5 +28,7 @@ srun python -m pyribs.experiments.ant.train_mujoco_dqdrl \
             --pretrain=False \
             --total_iterations=1000 \
             --dqd_algorithm=cma_maega \
+            --sigma0=1.0 \
+            --restart_rule=no_improvement
             --torch_deterministic=False \
             --logdir=./logs/qdppo_walker2d_12_13_22 \

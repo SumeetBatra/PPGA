@@ -13,7 +13,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/RL/train_ppo.py" />
-    <option name="PARAMETERS" value="--algorithm=ppo --env_name=humanoid --use_wandb=True --wandb_group=ppo --rollout_length=16 --wandb_run_name=ppo_humanoid --total_timesteps=50000000 --num_dims=2 --anneal_lr=False --num_minibatches=4 --update_epochs=2 --normalize_obs=False --normalize_rewards=True --mega_lambda=1 --env_type=brax --env_batch_size=4096 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --dqd_lr=0.01" />
+    <option name="PARAMETERS" value="--algorithm=ppo --env_name=ant --use_wandb=False --wandb_group=ppo --rollout_length=16 --wandb_run_name=ppo_ant_12_14 --total_timesteps=50000000 --num_dims=4 --anneal_lr=False --num_minibatches=4 --update_epochs=2 --normalize_obs=False --normalize_rewards=True --mega_lambda=1 --env_type=brax --env_batch_size=4096 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --dqd_lr=0.01" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

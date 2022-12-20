@@ -39,12 +39,11 @@ class PPO:
         self.mean_critic = Critic(self.obs_shape).to(self.device)
         self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
 
-        if cfg.env_type == 'brax':
-            # brax env
-            from envs.brax_custom.brax_env import make_vec_env_brax
-            multi_eval_cfg = copy.deepcopy(cfg)
-            multi_eval_cfg.env_batch_size = 2000
-            self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
+        # brax env
+        from envs.brax_custom.brax_env import make_vec_env_brax
+        multi_eval_cfg = copy.deepcopy(cfg)
+        multi_eval_cfg.env_batch_size = 1200
+        self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
 
             # metrics for logging
         self.metric_last_n_window = 10
@@ -451,7 +450,7 @@ class PPO:
         # TODO: figure out how to vectorize this
         for i in range(vec_env.num_envs):
             measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
-        measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1)
+        measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1).detach().cpu().numpy()
 
         total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).mean(
             axis=1)
@@ -459,14 +458,15 @@ class PPO:
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)
         mean_traj_length = torch.mean(traj_lengths.to(torch.float64)).detach().cpu().numpy().item()
+        objective_measures = np.concatenate((total_reward.reshape(-1, 1), measures), axis=1)
 
         if verbose:
+            np.set_printoptions(suppress=True)
             log.debug('Finished Evaluation Step')
-            log.info(f'Measures on eval: {measures}')
-            log.info(f'Rewards on eval: {total_reward}')
+            log.info(f'Reward + Measures: {objective_measures}')
             log.info(f'Max Reward on eval: {max_reward}')
             log.info(f'Min Reward on eval: {min_reward}')
             log.info(f'Mean Reward across all agents: {mean_reward}')
             log.info(f'Average Trajectory Length: {mean_traj_length}')
 
-        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims).detach().cpu().numpy(), {}
+        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims), {}

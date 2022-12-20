@@ -30,8 +30,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     #PPO params
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', type=str, help="Choose from [QDAntBulletEnv-v0,"
-                                                     "QDHalfCheetahBulletEnv-v0]")
+    parser.add_argument('--env_name', type=str)
     parser.add_argument('--seed', type=int, default=1111)
     parser.add_argument("--torch_deterministic", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="if toggled, `torch.backends.cudnn.deterministic=False`")
@@ -39,23 +38,14 @@ def parse_args():
                         help='Use weights and biases to track the exp')
     parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
     parser.add_argument('--wandb_group', type=str)
-    parser.add_argument('--report_interval', type=int, default=5, help='Log objective results every N updates')
 
-    # algorithm args
-    parser.add_argument('--total_timesteps', type=int, default=1000000)
-    parser.add_argument('--env_type', type=str, choices=['brax', 'isaac'], help='Whether to use cpu-envs or gpu-envs for rollouts')
     # args for brax
     parser.add_argument('--env_batch_size', default=1, type=int, help='Number of parallel environments to run')
 
-    # args for cpu-envs
-    parser.add_argument('--num_workers', type=int, default=4,
-                        help='Number of worker processes to spawn. '
-                             'Should always be <= number of logical cores on your machine')
-    parser.add_argument('--envs_per_worker', type=int, default=1,
-                        help='Num envs each worker process will step through sequentially')
+    # ppo hyperparams
+    parser.add_argument('--report_interval', type=int, default=5, help='Log objective results every N updates')
     parser.add_argument('--rollout_length', type=int, default=2048,
                         help='the number of steps to run in each environment per policy rollout')
-    # ppo hyperparams
     parser.add_argument('--learning_rate', type=float, default=3e-4)
     parser.add_argument('--anneal_lr', type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                         help='Toggle learning rate annealing for policy and value networks')
@@ -82,19 +72,23 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
 
     # QD Params
-    parser.add_argument('--algorithm', type=str, choices=['ppo', 'qd-ppo'])
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
                                                                     " CMA-ES instances exploring the archive")
     parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
-    parser.add_argument("--mega_lambda", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
-    parser.add_argument('--dqd_lr', type=float, default=0.001, help='Learning rate on gradient arborescence in DQD. Used in cma-mega, cma-maega, etc')
+    parser.add_argument("--popsize", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
     parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
     parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
-    parser.add_argument('--pretrain', type=lambda x: bool(strtobool(x)), default=False, help='Pretrain a policy with PPO as the initial solution point for DQD')
     parser.add_argument('--total_iterations', type=int, default=100, help='Number of iterations to run the entire dqd-rl loop')
     parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'], help='Which DQD algorithm should be running in the outer loop')
     parser.add_argument('--logdir', type=str, help='Experiment results directory')
     parser.add_argument('--save_heatmaps', type=lambda x: bool(strtobool(x)), default=True, help='Save the archive heatmaps. Only applies to archives with <= 2 measures')
+    parser.add_argument('--use_surrogate_archive', type=lambda x: bool(strtobool(x)), default=False, help="Use a surrogate archive at a higher resolution to get a better gradient signal for DQD")
+    parser.add_argument('--sigma0', type=float, default=1.0, help='Initial standard deviation parameter for the covariance matrix used in NES methods')
+    parser.add_argument('--restart_rule', type=str, choices=['basic', 'no_improvement'])
+    parser.add_argument('--calc_gradient_iters', type=int, help='Number of iters to run PPO when estimating the objective-measure gradients (N1)')
+    parser.add_argument('--move_mean_iters', type=int, help='Number of iterations to run PPO when moving the mean solution point (N2)')
+    parser.add_argument('--archive_lr', type=float, help='Archive learning rate for MAEGA')
+    parser.add_argument('--threshold_min', type=float, default=0.0, help='Min objective threshold for adding new solutions to the archive')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -124,7 +118,7 @@ def create_scheduler(cfg,
     obs_shape, action_shape = cfg.obs_shape, cfg.action_shape
     action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
     log.debug(f'Environment {cfg.env_name}, {action_dim=}, {obs_dim=}')
-    batch_size = cfg.mega_lambda
+    batch_size = cfg.popsize
 
     if initial_sol is None:
         initial_agent = Actor(cfg, obs_shape, action_shape)
@@ -138,11 +132,11 @@ def create_scheduler(cfg,
     archive_dims = [100, 100]
 
     if algorithm in ["cma_mae", "cma_maega"]:
-        threshold_min = 0.0
+        threshold_min = cfg.threshold_min
 
     if learning_rate is None:
         if algorithm in ["cma_mae", "cma_maega"]:
-            learning_rate = 0.5
+            learning_rate = cfg.archive_lr
         else:
             learning_rate = 1.0
 
@@ -160,7 +154,7 @@ def create_scheduler(cfg,
                                      seed=seed)
 
     surrogate_archive = None
-    use_surrogate_archive = True
+    use_surrogate_archive = cfg.use_surrogate_archive
     if use_surrogate_archive:
         surrogate_archive = GridArchive(solution_dim=1,
                                         dims=[20, 20, 20, 20],
@@ -181,7 +175,7 @@ def create_scheduler(cfg,
             GradientAborescenceEmitter(
                 archive,
                 initial_sol,
-                sigma0=1.0,
+                sigma0=cfg.sigma0,
                 step_size=cfg.dqd_lr,
                 grad_opt="adam",
                 selection_rule="mu",
@@ -194,12 +188,12 @@ def create_scheduler(cfg,
         emitters = [
             GradientAborescenceEmitter(archive,
                                        initial_sol,
-                                       sigma0=5.0,
-                                       step_size=cfg.dqd_lr,
+                                       sigma0=cfg.sigma0,
+                                       step_size=0.0,  # not used
                                        ranker="imp",
                                        selection_rule="mu",
                                        grad_opt="adam",
-                                       restart_rule="no_improvement",
+                                       restart_rule=cfg.restart_rule,
                                        bounds=None,
                                        batch_size=batch_size,
                                        seed=s,
@@ -207,9 +201,9 @@ def create_scheduler(cfg,
         ]
 
     log.debug(
-        f"Created Scheduler for {algorithm} with a dqd learning rate {cfg.dqd_lr}, archive learning rate {learning_rate}, "
+        f"Created Scheduler for {algorithm} with an archive learning rate of {learning_rate}, "
         f"and add mode {mode}, using solution dim {solution_dim} and archive "
-        f"dims {archive_dims}. Min threshold is {threshold_min}")
+        f"dims {archive_dims}. Min threshold is {threshold_min}. Restart rule is {cfg.restart_rule}")
 
     return Scheduler(archive, emitters, result_archive, surrogate_archive, add_mode=mode)
 
@@ -254,15 +248,6 @@ def run_experiment(cfg,
     is_dqd = True
     use_result_archive = algorithm in ["cma_mae", "cma_maega"]
 
-    # pretrain the policy to bootstrap dqd algorithm
-    if cfg.pretrain:
-        ppo.vec_inference.rew_normalizers[0] = NormalizeReward(cfg.num_envs)
-        avg_reward = -1000.0
-        while (avg_reward < 0):
-            log.info(f'pretraining an initial policy. {avg_reward=}')
-            ppo.train(num_updates=10, rollout_length=16, calculate_dqd_gradients=False)
-            avg_reward = sum(ppo.episodic_returns) / len(ppo.episodic_returns)
-
     if cfg.load_scheduler_from_cp:
         log.info("Loading an existing scheduler!")
         scheduler = load_scheduler_from_checkpoint(cfg.load_scheduler_from_cp)
@@ -300,7 +285,7 @@ def run_experiment(cfg,
             agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
         ppo.agents = mean_agents
-        objs, measures, jacobian, metadata = ppo.train(num_updates=10,
+        objs, measures, jacobian, metadata = ppo.train(num_updates=cfg.calc_gradient_iters,
                                                        rollout_length=cfg.rollout_length,
                                                        calculate_dqd_gradients=True,
                                                        negative_measure_gradients=False)
@@ -341,7 +326,7 @@ def run_experiment(cfg,
         mean_agents[0].reward_normalizer = NormalizeReward(cfg.num_envs)
         ppo.agents = mean_agents
         log.info('Moving the mean solution point...')
-        ppo.train(num_updates=5, rollout_length=cfg.rollout_length, calculate_dqd_gradients=False, move_mean_agent=True)
+        ppo.train(num_updates=cfg.move_mean_iters, rollout_length=cfg.rollout_length, calculate_dqd_gradients=False, move_mean_agent=True)
         trained_mean_agent = ppo.agents[0]  # TODO: make this work for multiple emitters?
         # hack the dqd algorithm to make the new mean solution point the one given by ppo rather than the
         # one given by recombination
@@ -404,17 +389,15 @@ def run_experiment(cfg,
                 })
 
 
-def ant_main(cfg,
-             algorithm,
-             ppo,
-             dim=1000,
-             init_pop=100,
-             itrs=10000,
-             outdir="logs",
-             log_freq=1,
-             log_arch_freq=10,
-             seed=None,
-             use_wandb=False):
+def qdppo_main(cfg,
+               algorithm,
+               ppo,
+               itrs=10000,
+               outdir="logs",
+               log_freq=1,
+               log_arch_freq=10,
+               seed=None,
+               use_wandb=False):
     """Experimental tool for the mujoco mujoco experiments.
 
     Args:
@@ -453,12 +436,9 @@ if __name__ == '__main__':
     cfg = parse_args()
     cfg.num_emitters = 1
 
-    if cfg.env_type == 'brax':
-        vec_env = make_vec_env_brax(cfg)
-        cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
-        cfg.num_envs = int(cfg.env_batch_size)
-    else:
-        raise NotImplementedError(f'{cfg.env_type} is undefined for "env_type"')
+    vec_env = make_vec_env_brax(cfg)
+    cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
+    cfg.num_envs = int(cfg.env_batch_size)
 
     cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
     cfg.obs_shape = vec_env.single_observation_space.shape
@@ -466,7 +446,7 @@ if __name__ == '__main__':
 
     ppo = PPO(seed=cfg.seed, cfg=cfg, vec_env=vec_env)
     if cfg.use_wandb:
-        config_wandb(batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name,
+        config_wandb(batch_size=cfg.batch_size, total_iters=cfg.total_iterations, run_name=cfg.wandb_run_name,
                      wandb_group=cfg.wandb_group)
     outdir = cfg.logdir
     assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None,\
@@ -479,16 +459,14 @@ if __name__ == '__main__':
     dummy_agent_params = Actor(cfg, cfg.obs_shape, cfg.action_shape).serialize()
     dims = len(dummy_agent_params)
 
-    ant_main(
+    qdppo_main(
         cfg,
         algorithm=cfg.dqd_algorithm,
         ppo=ppo,
-        dim=dims,
-        init_pop=1,
         itrs=cfg.total_iterations,
         outdir=outdir,
         log_arch_freq=cfg.log_arch_freq,
-        seed=0,
+        seed=cfg.seed,
         use_wandb=cfg.use_wandb
     )
     sys.exit(0)
