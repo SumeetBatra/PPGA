@@ -271,7 +271,8 @@ def run_experiment(cfg,
 
     prev_mean_grad_coeffs = scheduler.emitters[0].opt.mu
 
-    for itr in range(1, itrs + 1):
+    starting_iter = scheduler.emitters[0].itrs  # if loading a checkpoint, this will be > 0
+    for itr in range(starting_iter, itrs + 1):
         itr_start = time.time()
 
         # returns a single sol per emitter
