@@ -13,7 +13,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/algorithm/train_qdppo.py" />
-    <option name="PARAMETERS" value="--env_name=humanoid --rollout_length=128 --use_wandb=False --wandb_group=QDPPO --num_dims=2 --anneal_lr=False --num_minibatches=4 --update_epochs=2 --normalize_obs=False --normalize_rewards=True --wandb_run_name=method3_humanoid_ppo20_lr0.3 --popsize=300 --env_batch_size=3000 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --total_iterations=1000 --dqd_algorithm=cma_maega --sigma0=1.0 --restart_rule=no_improvement --calc_gradient_iters=20 --move_mean_iters=20 --archive_lr=0.1 --logdir=./logs/debug" />
+    <option name="PARAMETERS" value="--env_name=humanoid --rollout_length=128 --use_wandb=True --wandb_group=QDPPO --num_dims=2 --anneal_lr=False --num_minibatches=8 --update_epochs=4 --normalize_obs=False --normalize_rewards=True --wandb_run_name=method3_humanoid_archivelr0.5_reset_4kiters --popsize=200 --env_batch_size=2400 --learning_rate=0.0003 --vf_coef=2 --max_grad_norm=1 --total_iterations=4000 --dqd_algorithm=cma_maega --sigma0=1.0 --restart_rule=no_improvement --calc_gradient_iters=20 --move_mean_iters=20 --archive_lr=0.5 --logdir=./logs/method3_humanoid_archivelr0.5_reset_4kiters" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

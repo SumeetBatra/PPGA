@@ -87,14 +87,14 @@ class VectorizedPolicy(StochasticPolicy, ABC):
                 model.actor_mean[l].weight.data = layer.weight.data[i]
                 model.actor_mean[l].bias.data = layer.bias.data[i]
 
-                # update obs/rew normalizers
-                if self.cfg.normalize_obs:
-                    model.obs_normalizer = self.obs_normalizers[i]
-                if self.cfg.normalize_rewards:
-                    model.reward_normalizer = self.rew_normalizers[i]
+            # update obs/rew normalizers
+            if self.cfg.normalize_obs:
+                model.obs_normalizer = self.obs_normalizers[i]
+            if self.cfg.normalize_rewards:
+                model.reward_normalizer = self.rew_normalizers[i]
 
-                # update action logprobs
-                model.actor_logstd.data = self.actor_logstd[i]
+            # update action logprobs
+            model.actor_logstd.data = self.actor_logstd[i]
         return models
 
     @abstractmethod

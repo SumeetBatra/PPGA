@@ -81,7 +81,6 @@ class PPO:
         self.obs_measure_coeffs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs,
                                                self.vec_env.single_observation_space.shape[
                                                    0] + self.cfg.num_dims + 1)).to(self.device)
-        self._solution_batch = None
 
     @property
     def agents(self):
@@ -113,11 +112,11 @@ class PPO:
             self.device)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
-    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, dqd=False,
+    def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, calculate_dqd_gradients=False,
                           move_mean_agent=False):
         # bootstrap value if not done
         with torch.no_grad():
-            if dqd:
+            if calculate_dqd_gradients:
                 next_obs = next_obs.reshape(self.cfg.num_dims + 1, self.cfg.num_envs // (self.cfg.num_dims + 1), -1)
                 next_value = []
                 for i, obs, in enumerate(next_obs):
@@ -138,7 +137,7 @@ class PPO:
                 else:
                     is_next_nonterminal = 1.0 - dones[t + 1]
                     next_values = values[t + 1]
-                if dqd:
+                if calculate_dqd_gradients:
                     is_next_nonterminal = is_next_nonterminal.to(self.device)
                 else:
                     is_next_nonterminal = is_next_nonterminal.to(self.device).reshape(1, -1)
@@ -147,13 +146,6 @@ class PPO:
                     delta + self.cfg.gamma * self.cfg.gae_lambda * is_next_nonterminal * lastgaelam
             returns = advantages + values
         return advantages, returns
-
-    def discounted_rewards(self, rewards, episode_length):
-        discounted_rews = np.zeros_like(rewards)
-        last_delta = 0
-        for t in reversed(range(0, episode_length)):
-            discounted_rews[t] = last_delta = rewards[t] + self.cfg.gamma * last_delta
-        return discounted_rews[0]
 
     def batch_update(self, values, batched_data, calculate_dqd_gradients=False, move_mean_agent=False):
         b_values = values
@@ -222,14 +214,13 @@ class PPO:
 
                 self.vec_optimizer.zero_grad()
                 self.qd_critic_optim.zero_grad()
+                self.mean_critic_optim.zero_grad()
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.vec_inference.parameters(), self.cfg.max_grad_norm)
                 self.vec_optimizer.step()
                 if move_mean_agent:
                     nn.utils.clip_grad_norm_(self.mean_critic.parameters(), self.cfg.max_grad_norm)
                     self.mean_critic_optim.step()
-                    # every gradient update produces a new model, which can be potentially added to the archive
-                    self._solution_batch.append(self.vec_inference.vec_to_models()[0].serialize())
                 else:
                     # works for standard ppo or the dqd step
                     nn.utils.clip_grad_norm_(self.qd_critic.parameters(), self.cfg.max_grad_norm)
@@ -244,6 +235,7 @@ class PPO:
     def train(self, num_updates, rollout_length, calculate_dqd_gradients=False, move_mean_agent=False,
               negative_measure_gradients=False):
         global_step = 0
+        self.next_obs = self.vec_env.reset()
 
         if calculate_dqd_gradients:
             # TODO: make this work for multiple emitters
@@ -253,9 +245,6 @@ class PPO:
             agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(params) for params in
                       agent_original_params]
             self.agents = agents
-
-        if move_mean_agent:
-            self._solution_batch = []
 
         num_agents = len(self._agents)
 
@@ -322,7 +311,7 @@ class PPO:
                     rew_measures = (rew_measures * mask).sum(dim=2)
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, rew_measures,
                                                              self.values, self.dones,
-                                                             rollout_length=rollout_length, dqd=True)
+                                                             rollout_length=rollout_length, calculate_dqd_gradients=True)
             else:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
                                                              self.dones, rollout_length=rollout_length,
@@ -406,9 +395,6 @@ class PPO:
                 m.reshape(self.vec_inference.num_models, -1), \
                 jacobian, \
                 metadata
-        else:
-            # move_mean_agent
-            return self._solution_batch
 
     def evaluate(self, vec_agent, vec_env, verbose=True):
         '''

@@ -11,11 +11,17 @@ v = torch.ones(1, device='cuda')  # init torch cuda before jax
 
 _to_custom_env = {
     'ant': {'custom_env_name': 'brax_custom-ant-v0',
-            'action_clip': (-1, 1)},
+            'action_clip': (-1, 1),
+            'reward_clip': (-10, 10),
+            'obs_clip': (-10, 10)},
     'humanoid': {'custom_env_name': 'brax_custom-humanoid-v0',
-                 'action_clip': (-1, 1)},
+                 'action_clip': (-1, 1),
+                 'reward_clip': (-10, 10),
+                 'obs_clip': (-10, 10)},
     'walker2d': {'custom_env_name': 'brax-custom-walker2d-v0',
-                 'action_clip': (-1, 1)}
+                 'action_clip': (-1, 1),
+                 'reward_clip': (-10, 10),
+                 'obs_clip': (-10, 10)}
 }
 
 
@@ -29,9 +35,5 @@ def make_vec_env_brax(cfg):
     vec_env = gym.make(_to_custom_env[cfg.env_name]['custom_env_name'], batch_size=cfg.env_batch_size, seed=cfg.seed,
                        clip_actions=act_bounds)
     vec_env = to_torch.JaxToTorchWrapper(vec_env, device='cuda')
-
-    # vec_env = gym.wrappers.ClipAction(vec_env)
-    # vec_env = gym.wrappers.TransformObservation(vec_env, lambda obs: torch.clip(obs, -10, 10))
-    # vec_env = gym.wrappers.TransformReward(vec_env, lambda reward: torch.clip(reward, -10, 10))
 
     return vec_env

@@ -31,7 +31,7 @@ def parse_args():
     #PPO params
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str)
-    parser.add_argument('--seed', type=int, default=1111)
+    parser.add_argument('--seed', type=int, default=0)
     parser.add_argument("--torch_deterministic", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
                         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--use_wandb", default=False, type=lambda x: bool(strtobool(x)),

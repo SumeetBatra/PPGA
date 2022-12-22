@@ -58,6 +58,8 @@ def parse_args():
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
+    # vestigial QD params
+    parser.add_argument('--num_dims', type=int)
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -75,6 +77,7 @@ if __name__ == '__main__':
 
     cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
     cfg.num_envs = int(cfg.env_batch_size)
+    cfg.num_emitters = 1
     cfg.envs_per_model = cfg.num_envs // cfg.num_emitters
     cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
     cfg.obs_shape = vec_env.single_observation_space.shape

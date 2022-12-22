@@ -13,7 +13,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/utils/make_movie.py" />
-    <option name="PARAMETERS" value="--image_folder=$PROJECT_DIR$/logs/method3_humanoid_ppo20_lr0.3/cma_maega/trial_0/heatmaps --video_name=./videos/method3_humanoid_xnes_ppo20_lr0.3.mp4 --fps=60" />
+    <option name="PARAMETERS" value="--image_folder=$PROJECT_DIR$/logs/method3_humanoid_archivelr0.5_mb32_reset_envs/cma_maega/trial_0/heatmaps --video_name=./videos/method3_humanoid_move10_archivelr0.5_mb32_reset_envs.mp4 --fps=60" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />
