@@ -18,7 +18,7 @@ from ribs.emitters import GradientAborescenceEmitter
 from ribs.schedulers import Scheduler
 
 from RL.ppo import PPO
-from utils.utilities import log, config_wandb, get_checkpoints
+from utils.utilities import log, config_wandb, get_checkpoints, set_file_handler
 from models.actor_critic import Actor
 from envs.brax_custom.brax_env import make_vec_env_brax
 from utils.normalize_obs import NormalizeReward
@@ -89,6 +89,7 @@ def parse_args():
     parser.add_argument('--move_mean_iters', type=int, help='Number of iterations to run PPO when moving the mean solution point (N2)')
     parser.add_argument('--archive_lr', type=float, help='Archive learning rate for MAEGA')
     parser.add_argument('--threshold_min', type=float, default=0.0, help='Min objective threshold for adding new solutions to the archive')
+    parser.add_argument('--take_archive_snapshots', type=lambda x: bool(strtobool(x)), default=False, help='Log the objective scores in every cell in the archive every log_freq iterations. Useful for pretty visualizations')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -129,7 +130,7 @@ def create_scheduler(cfg,
 
     # TODO: specify bounds and archive_dims somewhere based on what env was passed in
     bounds = [(0.0, 1.0)] * cfg.num_dims
-    archive_dims = [100, 100]
+    archive_dims = [30, 30]
 
     if algorithm in ["cma_mae", "cma_maega"]:
         threshold_min = cfg.threshold_min
@@ -212,14 +213,14 @@ def run_experiment(cfg,
                    algorithm,
                    ppo,
                    itrs=10000,
-                   outdir="./logs",
+                   outdir="./experiments",
                    log_freq=1,
                    log_arch_freq=1000,
                    seed=None,
                    use_wandb=False):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Create a directory for this specific trial.
-    s_logdir = os.path.join(outdir, f"{algorithm}", f"trial_0")
+    s_logdir = os.path.join(outdir, f"{cfg.seed}")
     logdir = Path(s_logdir)
     if not logdir.is_dir():
         logdir.mkdir()
@@ -259,6 +260,18 @@ def run_experiment(cfg,
                                      learning_rate=None,
                                      use_result_archive=use_result_archive,
                                      initial_sol=ppo.agents[0].serialize())
+
+    archive_snapshot_filename = os.path.join(s_logdir, 'archive_snapshots.csv')
+    if cfg.take_archive_snapshots:
+        if os.path.exists(archive_snapshot_filename):
+            os.remove(archive_snapshot_filename)
+        num_cells = np.prod(scheduler.archive.dims)
+        with open(archive_snapshot_filename, 'w') as archive_snapshot_file:
+            row = ['Iteration'] + [f'cell_{i}' for i in range(num_cells)]
+            writer = csv.writer(archive_snapshot_file)
+            writer.writerow(row)
+
+
     result_archive = scheduler.result_archive
     best = 0.0
 
@@ -370,6 +383,18 @@ def run_experiment(cfg,
                             result_archive.stats.obj_max, result_archive.stats.obj_mean]
                     writer.writerow(data)
 
+        if (itr > 0 and itr % log_freq == 0 and cfg.take_archive_snapshots) or (final_itr and cfg.take_archive_snapshots):
+            with open(archive_snapshot_filename, 'a') as archive_snapshot_file:
+                writer = csv.writer(archive_snapshot_file)
+                num_cells = np.prod(scheduler.result_archive.dims)
+                elite_scores = [0 for _ in range(num_cells)]
+                for elite in scheduler.result_archive:
+                    score, index = elite.objective, elite.index
+                    elite_scores[index] = score
+                data = [itr] + elite_scores
+                writer.writerow(data)
+
+
         if use_wandb:
             with torch.no_grad():
                 normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
@@ -413,14 +438,18 @@ def qdppo_main(cfg,
         seed (int): Seed for the algorithm. By default, there is no seed.
     """
     # Create a shared logging directory for the experiments for this algorithm.
-    s_logdir = os.path.join(outdir, f"{algorithm}")
-    logdir = Path(s_logdir)
-    cfg.logdir = logdir
+    shared_exp_dir = os.path.join(outdir, f"{cfg.seed}")
+    exp_dir = Path(shared_exp_dir)
+    cfg.logdir = exp_dir
     outdir = Path(outdir)
     if not outdir.is_dir():
         outdir.mkdir()
-    if not logdir.is_dir():
-        logdir.mkdir()
+    if not exp_dir.is_dir():
+        exp_dir.mkdir()
+    logdir = os.path.join(shared_exp_dir, 'logs')
+    if not os.path.exists(logdir):
+        os.mkdir(logdir)
+    set_file_handler(logdir)
 
     run_experiment(cfg,
                    algorithm,
@@ -453,7 +482,7 @@ if __name__ == '__main__':
     assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None,\
         "Warning: this dir exists. Danger of overwriting previous run"
     if not os.path.exists(outdir):
-        os.mkdir(outdir)
+        os.makedirs(outdir)
 
     cfg.obs_shape = ppo.vec_env.single_observation_space.shape
     cfg.action_shape = ppo.vec_env.single_action_space.shape

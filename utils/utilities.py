@@ -39,6 +39,17 @@ log.addHandler(ch)
 log.addHandler(fh)
 
 
+def set_file_handler(logdir):
+    global fh
+    global log
+    log.removeHandler(fh)
+    filepath = os.path.join(logdir, 'log.txt')
+    fh = logging.FileHandler(filepath)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(formatter)
+    log.addHandler(fh)
+
+
 def config_wandb(**kwargs):
     # wandb initialization
     wandb.init(project='QDPPO', entity='sumeetb', group=kwargs['wandb_group'], name=kwargs['run_name'])
