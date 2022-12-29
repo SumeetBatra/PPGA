@@ -70,6 +70,7 @@ def parse_args():
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
+    parser.add_argument('--ctrl_cost_weight', type=float, default=0.1, help='Control cost coefficient. Default is the same as standard mujoco/brax etc.')
 
     # QD Params
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
