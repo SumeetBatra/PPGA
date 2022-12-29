@@ -1,31 +1,20 @@
 import os
+import argparse
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
+from attrdict import AttrDict
 
-def make_landscapes():
-    filepath = '/home/sumeet/QDPPO/experiments/debug/0/archive_snapshot.csv'
-    outdir = '/home/sumeet/QDPPO/experiments/debug/0/surfaces'
-    if not os.path.exists(outdir):
-        os.mkdir(outdir)
 
-    df = pd.read_csv(filepath)
-    num_rows = len(df)
-    for row in range(num_rows):
-        data = df.iloc[row]
-        cells = data.iloc[1:].to_numpy().reshape(30, 30)
-        sh0, sh1 = cells.shape[0], cells.shape[1]
-        x = np.linspace(0, 1, sh0)
-        y = np.linspace(0, 1, sh1)
-
-        fig = go.Figure(data=[go.Surface(z=cells, x=x, y=y)])
-        fig.update_layout(title='Archive 3D Surface', autosize=False, width=800, height=600,
-                          margin=dict(l=65, r=50, b=65, t=90))
-
-        filepath = os.path.join(outdir, f'archive_surface_{row:05d}.png')
-        fig.write_image(filepath)
-        print(f'Finished image {row}')
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--datapath', type=str, help='Path to the archive snapshots')
+    parser.add_argument('--fps', type=int)
+    parser.add_argument('--outdir', type=str, default='./videos')
+    args = parser.parse_args()
+    cfg = AttrDict(vars(args))
+    return cfg
 
 
 def frame_args(duration):
@@ -37,16 +26,16 @@ def frame_args(duration):
     }
 
 
-def animated_surface():
-    filepath = '/home/sumeet/QDPPO/experiments/debug/0/archive_snapshots.csv'
-    outdir = './videos'
+def animated_surface(cfg):
+    filepath = cfg.datapath
+    outdir = cfg.outdir
     df = pd.read_csv(filepath)
-    z_data = df.drop('Iteration', axis=1).to_numpy().reshape(-1, 30, 30)
+    z_data = df.drop('Iteration', axis=1).to_numpy().reshape(-1, 30, 30)  # TODO: make this general
     sh0, sh1 = z_data.shape[1], z_data.shape[2]
     x = np.linspace(0, 1, sh0)
     y = np.linspace(0, 1, sh1)
 
-    fps = 30
+    fps = cfg.fps
     duration_ms = 1000 * (1 / fps)
 
     fig = go.Figure(
@@ -81,4 +70,5 @@ def animated_surface():
 
 
 if __name__ == '__main__':
-    animated_surface()
+    cfg = parse_args()
+    animated_surface(cfg)

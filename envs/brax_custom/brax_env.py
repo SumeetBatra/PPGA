@@ -21,7 +21,9 @@ _to_custom_env = {
     'walker2d': {'custom_env_name': 'brax-custom-walker2d-v0',
                  'action_clip': (-1, 1),
                  'reward_clip': (-10, 10),
-                 'obs_clip': (-10, 10)}
+                 'obs_clip': (-10, 10)},
+    'halfcheetah': {'custom_env_name': 'brax-custom-halfcheetah-v0',
+                    'action_clip': (-1, 1)}
 }
 
 
@@ -33,7 +35,7 @@ def make_vec_env_brax(cfg):
 
     act_bounds = _to_custom_env[cfg.env_name]['action_clip']
     vec_env = gym.make(_to_custom_env[cfg.env_name]['custom_env_name'], batch_size=cfg.env_batch_size, seed=cfg.seed,
-                       clip_actions=act_bounds)
+                       clip_actions=act_bounds, ctrl_cost_weight=0.01)
     vec_env = to_torch.JaxToTorchWrapper(vec_env, device='cuda')
 
     return vec_env

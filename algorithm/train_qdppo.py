@@ -130,7 +130,7 @@ def create_scheduler(cfg,
 
     # TODO: specify bounds and archive_dims somewhere based on what env was passed in
     bounds = [(0.0, 1.0)] * cfg.num_dims
-    archive_dims = [30, 30]
+    archive_dims = [50, 50]
 
     if algorithm in ["cma_mae", "cma_maega"]:
         threshold_min = cfg.threshold_min
@@ -321,7 +321,15 @@ def run_experiment(cfg,
             objs -= reg_loss
 
         best = max(best, max(objs))
-        scheduler.tell(objs, measures)
+        restarted = scheduler.tell(objs, measures)
+        if restarted:
+            log.debug("Emitter restarted. Changing the mean agent...")
+            mean_soln_point = scheduler.emitters[0].theta
+            mean_agents = [Actor(cfg, obs_shape, action_shape).deserialize(mean_soln_point).to(device)]
+            for agent in mean_agents:
+                agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
+
+
 
         mean_grad_coeffs = scheduler.emitters[0].opt.mu  # keep track of where the emitter is taking us
         mean_grad_coeffs = np.expand_dims(mean_grad_coeffs, axis=0).astype(np.float32)
