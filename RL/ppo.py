@@ -11,7 +11,7 @@ import wandb
 from collections import deque
 from utils.utilities import log, save_checkpoint
 from models.vectorized import VectorizedActor
-from models.actor_critic import Actor, Critic, QDCritic, QDCritic2
+from models.actor_critic import Actor, Critic, QDCritic
 
 
 # based off of the clean-rl implementation
@@ -27,7 +27,7 @@ class PPO:
 
         agent = Actor(cfg, self.obs_shape, self.action_shape).to(self.device)
         self._agents = [agent]
-        critic = QDCritic2(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
+        critic = QDCritic(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
         self.qd_critic = critic
         self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
                                              action_shape=self.action_shape).to(self.device)
