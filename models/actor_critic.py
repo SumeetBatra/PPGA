@@ -5,6 +5,8 @@ import torch.nn as nn
 import numpy as np
 
 from models.policy import StochasticPolicy
+from typing import Union, Optional
+from attrdict import AttrDict
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -14,7 +16,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Actor(StochasticPolicy):
-    def __init__(self, cfg, obs_shape, action_shape: np.ndarray):
+    def __init__(self, cfg: AttrDict, obs_shape: Union[int, tuple], action_shape: np.ndarray):
         super().__init__(cfg)
 
         self.actor_mean = nn.Sequential(
@@ -85,6 +87,9 @@ class PGAMEActor(nn.Module):
 
 class Critic(nn.Module):
     def __init__(self, obs_shape):
+        '''
+        Standard critic used in PPO. Used to move the mean solution point
+        '''
         super().__init__()
         self.core = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 256)),
@@ -105,7 +110,16 @@ class Critic(nn.Module):
 
 
 class QDCritic(nn.Module):
-    def __init__(self, obs_shape, measure_dim, critics_list: List[nn.Module] = None):
+    def __init__(self,
+                 obs_shape: Union[int, tuple],
+                 measure_dim: int,
+                 critics_list: Optional[List[nn.Module]] = None):
+        '''
+        Instantiates a multi-headed critic used for objective-measure gradient estimation
+        :param obs_shape: shape of the observation space
+        :param measure_dim: number of measures
+        :param critics_list: Use this to pass in existing pre-trained critics
+        '''
         super(QDCritic, self).__init__()
         self.measure_dim = measure_dim
         if critics_list is None:
