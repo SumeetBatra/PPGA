@@ -97,13 +97,13 @@ def parse_args():
     return cfg
 
 
-def create_scheduler(cfg,
-                     algorithm,
-                     seed,
-                     num_emitters,
-                     learning_rate=None,
-                     use_result_archive=True,
-                     initial_sol=None):
+def create_scheduler(cfg: AttrDict,
+                     algorithm: str,
+                     seed: int,
+                     num_emitters: int,
+                     learning_rate: float = None,
+                     use_result_archive: bool = True,
+                     initial_sol: np.ndarray = None):
     """Creates a scheduler based on the algorithm name.
 
     Args:
@@ -114,6 +114,7 @@ def create_scheduler(cfg,
         use_result_archive (bool): Whether to use a separate archive to store
             the results.
         seed (int): Main seed or the various components.
+        initial_sol: initial solution (agent)
     Returns:
         ribs.schedulers.Scheduler: A ribs scheduler for running the algorithm.
     """
@@ -210,15 +211,15 @@ def create_scheduler(cfg,
     return Scheduler(archive, emitters, result_archive, surrogate_archive, add_mode=mode)
 
 
-def run_experiment(cfg,
-                   algorithm,
-                   ppo,
-                   itrs=10000,
-                   outdir="./experiments",
-                   log_freq=1,
-                   log_arch_freq=1000,
-                   seed=None,
-                   use_wandb=False):
+def run_experiment(cfg: AttrDict,
+                   algorithm: str,
+                   ppo: PPO,
+                   itrs: int = 10000,
+                   outdir: str = "./experiments",
+                   log_freq: int = 1,
+                   log_arch_freq: int = 1000,
+                   seed: int = None,
+                   use_wandb: bool = False):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Create a directory for this specific trial.
     s_logdir = os.path.join(outdir, f"{cfg.seed}")
@@ -271,7 +272,6 @@ def run_experiment(cfg,
             row = ['Iteration'] + [f'cell_{i}' for i in range(num_cells)]
             writer = csv.writer(archive_snapshot_file)
             writer.writerow(row)
-
 
     result_archive = scheduler.result_archive
     best = 0.0
@@ -349,8 +349,11 @@ def run_experiment(cfg,
         mean_agents[0].reward_normalizer = NormalizeReward(cfg.num_envs)
         ppo.agents = mean_agents
         log.info('Moving the mean solution point...')
-        ppo.train(num_updates=cfg.move_mean_iters, rollout_length=cfg.rollout_length, calculate_dqd_gradients=False, move_mean_agent=True)
-        trained_mean_agent = ppo.agents[0]  # TODO: make this work for multiple emitters?
+        ppo.train(num_updates=cfg.move_mean_iters,
+                  rollout_length=cfg.rollout_length,
+                  calculate_dqd_gradients=False,
+                  move_mean_agent=True)
+        trained_mean_agent = ppo.agents[0]
         # hack the dqd algorithm to make the new mean solution point the one given by ppo rather than the
         # one given by recombination
         new_mean_sol = trained_mean_agent.serialize()
@@ -403,7 +406,6 @@ def run_experiment(cfg,
                 data = [itr] + elite_scores
                 writer.writerow(data)
 
-
         if use_wandb:
             with torch.no_grad():
                 normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
@@ -424,15 +426,15 @@ def run_experiment(cfg,
                 })
 
 
-def qdppo_main(cfg,
-               algorithm,
-               ppo,
-               itrs=10000,
-               outdir="logs",
-               log_freq=1,
-               log_arch_freq=10,
-               seed=None,
-               use_wandb=False):
+def qdppo_main(cfg: AttrDict,
+               algorithm: str,
+               ppo: PPO,
+               itrs: int = 10000,
+               outdir: str = "logs",
+               log_freq: int = 1,
+               log_arch_freq: int = 10,
+               seed: int = None,
+               use_wandb: str = False):
     """Experimental tool for the mujoco mujoco experiments.
 
     Args:
