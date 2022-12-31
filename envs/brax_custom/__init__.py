@@ -44,6 +44,16 @@ from envs.brax_custom.custom_wrappers.locomotion_wrappers import FeetContactWrap
 from envs.brax_custom.custom_wrappers.reward import TotalReward
 from envs.brax_custom.custom_wrappers.clip_wrappers import ActionClipWrapper, RewardClipWrapper, ObservationClipWrapper
 
+# From QDax: experimentally determinated offset (except for antmaze)
+# should be sufficient to have only positive rewards but no guarantee
+reward_offset = {
+    "ant": 3.24,
+    "humanoid": 0.0,
+    "halfcheetah": 9.231,
+    "hopper": 0.9,
+    "walker2d": 1.413,
+}
+
 _envs = {
     'acrobot': acrobot.Acrobot,
     'ant': functools.partial(ant.Ant, use_contact_forces=True),

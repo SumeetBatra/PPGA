@@ -45,7 +45,7 @@ class PPO:
         multi_eval_cfg.env_batch_size = 1200
         self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
 
-            # metrics for logging
+        # metrics for logging
         self.metric_last_n_window = 10
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
         self._report_interval = cfg.report_interval
@@ -108,7 +108,7 @@ class PPO:
         self._grad_coeffs = coeffs
 
     def update_critics(self, critics_list: List[Critic]):
-        self.qd_critic = QDCritic2(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(
+        self.qd_critic = QDCritic(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(
             self.device)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
@@ -440,6 +440,9 @@ class PPO:
 
         total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).mean(
             axis=1)
+        avg_traj_lengths = traj_lengths.to(torch.float32).reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).\
+            mean(dim=1).cpu().numpy()
+        metadata = np.array([{'traj_length': t} for t in avg_traj_lengths]).reshape(-1,)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)
@@ -455,4 +458,4 @@ class PPO:
             log.info(f'Mean Reward across all agents: {mean_reward}')
             log.info(f'Average Trajectory Length: {mean_traj_length}')
 
-        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims), {}
+        return total_reward.reshape(-1, ), measures.reshape(-1, self.cfg.num_dims), metadata

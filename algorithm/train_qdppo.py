@@ -1,4 +1,3 @@
-import copy
 import argparse
 import time
 import os
@@ -24,6 +23,7 @@ from envs.brax_custom.brax_env import make_vec_env_brax
 from utils.normalize_obs import NormalizeReward
 from utils.utilities import save_cfg
 from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint
+from envs.brax_custom import reward_offset
 
 
 def parse_args():
@@ -70,7 +70,6 @@ def parse_args():
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
-    parser.add_argument('--ctrl_cost_weight', type=float, default=0.1, help='Control cost coefficient. Default is the same as standard mujoco/brax etc.')
 
     # QD Params
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
@@ -122,6 +121,7 @@ def create_scheduler(cfg: AttrDict,
     action_dim, obs_dim = np.prod(action_shape), np.prod(obs_shape)
     log.debug(f'Environment {cfg.env_name}, {action_dim=}, {obs_dim=}')
     batch_size = cfg.popsize
+    qd_offset = reward_offset[cfg.env_name]
 
     if initial_sol is None:
         initial_agent = Actor(cfg, obs_shape, action_shape)
@@ -208,7 +208,7 @@ def create_scheduler(cfg: AttrDict,
         f"and add mode {mode}, using solution dim {solution_dim} and archive "
         f"dims {archive_dims}. Min threshold is {threshold_min}. Restart rule is {cfg.restart_rule}")
 
-    return Scheduler(archive, emitters, result_archive, surrogate_archive, add_mode=mode)
+    return Scheduler(archive, emitters, result_archive, surrogate_archive, add_mode=mode, reward_offset=qd_offset)
 
 
 def run_experiment(cfg: AttrDict,
@@ -309,20 +309,20 @@ def run_experiment(cfg: AttrDict,
 
         best = max(best, max(objs))
 
-        scheduler.tell_dqd(objs, measures, jacobian)
+        scheduler.tell_dqd(objs, measures, jacobian, metadata)
 
         # sample a batch of branched solution points and evaluate their f and m
         branched_sols = scheduler.ask()
         branched_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in branched_sols]
         ppo.agents = branched_agents
-        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.multi_eval_env)
+        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env)
 
         if cfg.weight_decay:
             reg_loss = cfg.weight_decay * np.array([np.linalg.norm(sol) for sol in branched_sols]).reshape(objs.shape)
             objs -= reg_loss
 
         best = max(best, max(objs))
-        restarted = scheduler.tell(objs, measures)
+        restarted = scheduler.tell(objs, measures, metadata)
         if restarted:
             log.debug("Emitter restarted. Changing the mean agent...")
             mean_soln_point = scheduler.emitters[0].theta
@@ -410,7 +410,7 @@ def run_experiment(cfg: AttrDict,
             with torch.no_grad():
                 normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
             wandb.log({
-                "QD/QD Score": result_archive.stats.qd_score,
+                "QD/QD Score": scheduler.archive.stats.qd_score,  # use regular archive for qd score because it factors in the reward offset
                 "QD/average performance": result_archive.stats.obj_mean,
                 "QD/coverage (%)": result_archive.stats.coverage * 100.0,
                 "QD/best score": result_archive.stats.obj_max,
