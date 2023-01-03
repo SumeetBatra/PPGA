@@ -74,6 +74,7 @@ def parse_args():
     # QD Params
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
                                                                     " CMA-ES instances exploring the archive")
+    parser.add_argument('--grid_size', type=int, help='Number of cells per archive dimension')
     parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
     parser.add_argument("--popsize", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
     parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
@@ -132,7 +133,7 @@ def create_scheduler(cfg: AttrDict,
 
     # TODO: specify bounds and archive_dims somewhere based on what env was passed in
     bounds = [(0.0, 1.0)] * cfg.num_dims
-    archive_dims = [50, 50]
+    archive_dims = [cfg.grid_size] * cfg.num_dims
 
     if algorithm in ["cma_mae", "cma_maega"]:
         threshold_min = cfg.threshold_min
