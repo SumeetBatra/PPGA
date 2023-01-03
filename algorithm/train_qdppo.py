@@ -89,7 +89,7 @@ def parse_args():
     parser.add_argument('--calc_gradient_iters', type=int, help='Number of iters to run PPO when estimating the objective-measure gradients (N1)')
     parser.add_argument('--move_mean_iters', type=int, help='Number of iterations to run PPO when moving the mean solution point (N2)')
     parser.add_argument('--archive_lr', type=float, help='Archive learning rate for MAEGA')
-    parser.add_argument('--threshold_min', type=float, default=0.0, help='Min objective threshold for adding new solutions to the archive')
+    parser.add_argument('--threshold_min', type=float, default=-np.inf, help='Min objective threshold for adding new solutions to the archive')
     parser.add_argument('--take_archive_snapshots', type=lambda x: bool(strtobool(x)), default=False, help='Log the objective scores in every cell in the archive every log_freq iterations. Useful for pretty visualizations')
 
     args = parser.parse_args()
@@ -255,6 +255,9 @@ def run_experiment(cfg: AttrDict,
     if cfg.load_scheduler_from_cp:
         log.info("Loading an existing scheduler!")
         scheduler = load_scheduler_from_checkpoint(cfg.load_scheduler_from_cp)
+        # reinstantiate the pytorch generator with the correct seed
+        scheduler.emitters[0].opt.problem._generator = torch.Generator(device=device)
+        scheduler.emitters[0].opt.problem._generator.manual_seed(seed)
     else:
         scheduler = create_scheduler(cfg,
                                      algorithm,
@@ -377,6 +380,7 @@ def run_experiment(cfg: AttrDict,
             # Save a full archive for analysis.
             df = result_archive.as_pandas(include_solutions=True)
             df.to_pickle(os.path.join(final_cp_dir, f"archive_{itr:08d}.pkl"))
+            scheduler.emitters[0].opt.problem._generator = None# cannot pickle generator objects so need to remove it
             # save the scheduler for checkpointing
             with open(os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl'), 'wb') as f:
                 pickle.dump(scheduler, f)
