@@ -259,6 +259,8 @@ class PPO:
 
                 with torch.no_grad():
                     action, logprob, _ = self.vec_inference.get_action(self.next_obs)
+                    # b/c of torch amp, need to convert back to float32
+                    action = action.to(torch.float32)
                     if calculate_dqd_gradients:
                         next_obs = self.next_obs.reshape(num_agents, self.cfg.num_envs // num_agents, -1)
                         value = []
@@ -423,6 +425,7 @@ class PPO:
                 if self.cfg.normalize_obs:
                     obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
+                acts = acts.to(torch.float32)
                 obs, rew, next_dones, infos = vec_env.step(acts)
                 measures_acc[traj_length] = infos['measures']
                 obs = obs.to(self.device)

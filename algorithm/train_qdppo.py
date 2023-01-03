@@ -494,9 +494,9 @@ if __name__ == '__main__':
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_iters=cfg.total_iterations, run_name=cfg.wandb_run_name,
                      wandb_group=cfg.wandb_group)
-    outdir = cfg.logdir
+    outdir = os.path.join(cfg.logdir, str(cfg.seed))
     assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None,\
-        "Warning: this dir exists. Danger of overwriting previous run"
+        f"Warning: experiment dir {outdir} exists. Danger of overwriting previous run"
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
