@@ -148,9 +148,9 @@ class VectorizedActor(VectorizedPolicy):
     def forward(self, x):
         return self.actor_mean(x)
 
-    @autocast(device_type='cuda')
     def get_action(self, obs, action=None):
-        action_mean = self.actor_mean(obs)
+        with autocast(device_type=self.device.type):
+            action_mean = self.actor_mean(obs)
         repeats = obs.shape[0] // self.num_models
         action_logstd = torch.repeat_interleave(self.actor_logstd, repeats, dim=0)
         action_logstd = action_logstd.expand_as(action_mean)
