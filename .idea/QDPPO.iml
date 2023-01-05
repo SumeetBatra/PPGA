@@ -5,6 +5,7 @@
       <sourceFolder url="file://$MODULE_DIR$/envs/signal-slot" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/RL" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/pyribs" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/data" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />

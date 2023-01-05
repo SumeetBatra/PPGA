@@ -13,7 +13,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/algorithm/train_qdppo.py" />
-    <option name="PARAMETERS" value="--env_name=ant --rollout_length=128 --use_wandb=True --wandb_group=QDPPO --num_dims=4 --num_minibatches=8 --update_epochs=4 --normalize_obs=False --normalize_rewards=True --wandb_run_name=method3_ant_01_01_23_v2 --popsize=200 --env_batch_size=4000 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --torch_deterministic=False --total_iterations=2000 --dqd_algorithm=cma_maega --calc_gradient_iters=10 --move_mean_iters=10 --archive_lr=0.5 --restart_rule=no_improvement --sigma0=10.0 --threshold_min=-10000 --logdir=./experiments/method3_ant_01_01_23_v2" />
+    <option name="PARAMETERS" value="--env_name=ant --rollout_length=128 --use_wandb=True --seed=1111 --wandb_group=QDPPO --num_dims=4 --num_minibatches=8 --update_epochs=4 --normalize_obs=False --normalize_rewards=True --wandb_run_name=paper_qdppo_ant_seed_1111 --popsize=400 --env_batch_size=4000 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --torch_deterministic=False --total_iterations=2000 --dqd_algorithm=cma_maega --calc_gradient_iters=10 --move_mean_iters=10 --archive_lr=0.5 --restart_rule=no_improvement --sigma0=10.0 --threshold_min=-10000 --grid_size=10 --logdir=./experiments/paper_qdppo_ant" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />

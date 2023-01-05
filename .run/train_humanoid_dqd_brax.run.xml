@@ -5,6 +5,7 @@
     <option name="PARENT_ENVS" value="true" />
     <envs>
       <env name="PYTHONUNBUFFERED" value="1" />
+      <env name="XLA_PYTHON_CLIENT_PREALLOCATE" value="false" />
     </envs>
     <option name="SDK_HOME" value="" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/" />
@@ -13,7 +14,7 @@
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/algorithm/train_qdppo.py" />
-    <option name="PARAMETERS" value="--env_name=humanoid --rollout_length=128 --use_wandb=True --wandb_group=QDPPO --num_dims=2 --anneal_lr=False --num_minibatches=8 --update_epochs=4 --normalize_obs=False --normalize_rewards=True --wandb_run_name=method3_humanoid_archivelr0.5_50x50 --popsize=300 --env_batch_size=3000 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --total_iterations=4000 --dqd_algorithm=cma_maega --sigma0=1.0 --restart_rule=no_improvement --calc_gradient_iters=10 --move_mean_iters=10 --archive_lr=0.5 --logdir=./experiments/method3_humanoid_archivelr0.5_50x50" />
+    <option name="PARAMETERS" value="--env_name=humanoid --rollout_length=128 --use_wandb=True --wandb_group=QDPPO --num_dims=2 --seed=1111 --anneal_lr=False --num_minibatches=8 --update_epochs=4 --normalize_obs=False --normalize_rewards=True --wandb_run_name=method3_humanoid_archivelr0.5_50x50_minthresh250 --popsize=300 --env_batch_size=3000 --learning_rate=0.001 --vf_coef=2 --max_grad_norm=1 --total_iterations=3000 --dqd_algorithm=cma_maega --sigma0=1.0 --restart_rule=no_improvement --calc_gradient_iters=10 --move_mean_iters=10 --archive_lr=0.5 --threshold_min=250 --grid_size=50 --logdir=./experiments/method3_humanoid_archivelr0.5_50x50_minthresh250 --load_scheduler_from_cp=$PROJECT_DIR$/experiments/method3_humanoid_archivelr0.5_50x50_minthresh250/1111/1111/checkpoints/cp_00002170/scheduler_00002170.pkl" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="false" />
