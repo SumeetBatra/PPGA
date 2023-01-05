@@ -368,7 +368,7 @@ def run_experiment(cfg: AttrDict,
 
         if cfg.num_dims <= 2:
             save_heatmap(result_archive, os.path.join(str(heatmap_dir), f'heatmap_{itr:05d}.png'),
-                         emitter_loc=emitter_loc, forces=force)
+                         emitter_loc=emitter_loc, forces=None)
 
         # Save the archive at the given frequency.
         # Always save on the final iteration.
