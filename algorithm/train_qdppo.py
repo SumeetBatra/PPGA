@@ -74,8 +74,8 @@ def parse_args():
     # QD Params
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"
                                                                     " CMA-ES instances exploring the archive")
-    parser.add_argument('--grid_size', type=int, help='Number of cells per archive dimension')
-    parser.add_argument("--num_dims", type=int, help="Dimensionality of measures")
+    parser.add_argument('--grid_size', type=int, required=True, help='Number of cells per archive dimension')
+    parser.add_argument("--num_dims", type=int, required=True, help="Dimensionality of measures")
     parser.add_argument("--popsize", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
     parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
     parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
@@ -89,7 +89,7 @@ def parse_args():
     parser.add_argument('--calc_gradient_iters', type=int, help='Number of iters to run PPO when estimating the objective-measure gradients (N1)')
     parser.add_argument('--move_mean_iters', type=int, help='Number of iterations to run PPO when moving the mean solution point (N2)')
     parser.add_argument('--archive_lr', type=float, help='Archive learning rate for MAEGA')
-    parser.add_argument('--threshold_min', type=float, default=-np.inf, help='Min objective threshold for adding new solutions to the archive')
+    parser.add_argument('--threshold_min', type=float, default=0.0, help='Min objective threshold for adding new solutions to the archive')
     parser.add_argument('--take_archive_snapshots', type=lambda x: bool(strtobool(x)), default=False, help='Log the objective scores in every cell in the archive every log_freq iterations. Useful for pretty visualizations')
 
     args = parser.parse_args()
@@ -149,13 +149,15 @@ def create_scheduler(cfg: AttrDict,
                           ranges=bounds,
                           learning_rate=learning_rate,  # lr used only in maega
                           threshold_min=threshold_min,
-                          seed=seed)
+                          seed=seed,
+                          qd_offset=qd_offset)
     result_archive = None
     if use_result_archive:
         result_archive = GridArchive(solution_dim=solution_dim,
                                      dims=archive_dims,
                                      ranges=bounds,
-                                     seed=seed)
+                                     seed=seed,
+                                     qd_offset=qd_offset)
 
     surrogate_archive = None
     use_surrogate_archive = cfg.use_surrogate_archive
@@ -223,7 +225,7 @@ def run_experiment(cfg: AttrDict,
                    use_wandb: bool = False):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # Create a directory for this specific trial.
-    s_logdir = os.path.join(outdir, f"{cfg.seed}")
+    s_logdir = outdir
     logdir = Path(s_logdir)
     if not logdir.is_dir():
         logdir.mkdir()
@@ -415,7 +417,7 @@ def run_experiment(cfg: AttrDict,
             with torch.no_grad():
                 normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
             wandb.log({
-                "QD/QD Score": scheduler.archive.stats.qd_score,  # use regular archive for qd score because it factors in the reward offset
+                "QD/QD Score": scheduler.result_archive.offset_qd_score,  # use regular archive for qd score because it factors in the reward offset
                 "QD/average performance": result_archive.stats.obj_mean,
                 "QD/coverage (%)": result_archive.stats.coverage * 100.0,
                 "QD/best score": result_archive.stats.obj_max,
@@ -454,7 +456,7 @@ def qdppo_main(cfg: AttrDict,
         seed (int): Seed for the algorithm. By default, there is no seed.
     """
     # Create a shared logging directory for the experiments for this algorithm.
-    shared_exp_dir = os.path.join(outdir, f"{cfg.seed}")
+    shared_exp_dir = outdir
     exp_dir = Path(shared_exp_dir)
     cfg.logdir = exp_dir
     outdir = Path(outdir)
