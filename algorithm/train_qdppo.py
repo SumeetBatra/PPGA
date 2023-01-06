@@ -495,7 +495,7 @@ if __name__ == '__main__':
     ppo = PPO(seed=cfg.seed, cfg=cfg, vec_env=vec_env)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_iters=cfg.total_iterations, run_name=cfg.wandb_run_name,
-                     wandb_group=cfg.wandb_group)
+                     wandb_group=cfg.wandb_group, cfg=cfg)
     outdir = os.path.join(cfg.logdir, str(cfg.seed))
     assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None,\
         f"Warning: experiment dir {outdir} exists. Danger of overwriting previous run"
