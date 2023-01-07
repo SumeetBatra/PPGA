@@ -3,4 +3,4 @@
 	url = git@github.com:SumeetBatra/dqd.git
 [submodule "pyribs"]
 	path = pyribs
-	url = https://github.com/SumeetBatra/pyribs/tree/master
+	url = https://github.com/SumeetBatra/pyribs
