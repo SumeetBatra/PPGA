@@ -20,7 +20,7 @@ from RL.ppo import PPO
 from utils.utilities import log, config_wandb, get_checkpoints, set_file_handler
 from models.actor_critic import Actor
 from envs.brax_custom.brax_env import make_vec_env_brax
-from utils.normalize_obs import NormalizeReward
+from utils.normalize_obs import NormalizeReward, NormalizeObservation
 from utils.utilities import save_cfg
 from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint
 from envs.brax_custom import reward_offset
@@ -203,7 +203,8 @@ def create_scheduler(cfg: AttrDict,
                                        bounds=None,
                                        batch_size=batch_size,
                                        seed=s,
-                                       use_wandb=cfg.use_wandb) for s in emitter_seeds
+                                       use_wandb=cfg.use_wandb,
+                                       normalize_obs=cfg.normalize_obs) for s in emitter_seeds
         ]
 
     log.debug(
@@ -300,6 +301,10 @@ def run_experiment(cfg: AttrDict,
         mean_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol
                        in solution_batch]
 
+        if cfg.normalize_obs:
+            if scheduler.emitters[0].mean_agent_obs_normalizer is not None:
+                mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
+
         # # need to reset the std-dev parameter. Otherwise the agents stop learning and branched solutions
         # # all fall in the same cell
         for agent in mean_agents:
@@ -321,7 +326,7 @@ def run_experiment(cfg: AttrDict,
         branched_sols = scheduler.ask()
         branched_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in branched_sols]
         ppo.agents = branched_agents
-        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env)
+        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env, verbose=True, obs_normalizer=mean_agents[0].obs_normalizer)
 
         if cfg.weight_decay:
             reg_loss = cfg.weight_decay * np.array([np.linalg.norm(sol) for sol in branched_sols]).reshape(objs.shape)
@@ -333,6 +338,8 @@ def run_experiment(cfg: AttrDict,
             log.debug("Emitter restarted. Changing the mean agent...")
             mean_soln_point = scheduler.emitters[0].theta
             mean_agents = [Actor(cfg, obs_shape, action_shape).deserialize(mean_soln_point).to(device)]
+            if cfg.normalize_obs:
+                mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
             for agent in mean_agents:
                 agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
@@ -364,6 +371,8 @@ def run_experiment(cfg: AttrDict,
         # one given by recombination
         new_mean_sol = trained_mean_agent.serialize()
         scheduler.emitters[0].update_theta(new_mean_sol)
+        if cfg.normalize_obs:
+            scheduler.emitters[0].mean_agent_obs_normalizer = trained_mean_agent.obs_normalizer
 
         # logging
         log.debug(f'{itr=}, {itrs=}, Progress: {(100.0 * (itr / itrs)):.2f}%')

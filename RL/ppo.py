@@ -240,6 +240,9 @@ class PPO:
         if calculate_dqd_gradients:
             # TODO: make this work for multiple emitters
             solution_params = self._agents[0].serialize()
+            original_obs_normalizer = None
+            if self.cfg.normalize_obs:
+                original_obs_normalizer = self._agents[0].obs_normalizer
             # create copy of agent for f and one of each m
             agent_original_params = [copy.deepcopy(solution_params) for _ in range(self.cfg.num_dims + 1)]
             agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(params) for params in
@@ -392,13 +395,13 @@ class PPO:
             self.vec_inference = VectorizedActor(self.cfg, original_agent, Actor,
                                                  obs_shape=self.obs_shape,
                                                  action_shape=self.action_shape)
-            f, m, metadata = self.evaluate(self.vec_inference, self.multi_eval_env)
+            f, m, metadata = self.evaluate(self.vec_inference, self.multi_eval_env, obs_normalizer=original_obs_normalizer)
             return f.reshape(self.vec_inference.num_models, ), \
                 m.reshape(self.vec_inference.num_models, -1), \
                 jacobian, \
                 metadata
 
-    def evaluate(self, vec_agent, vec_env, verbose=True):
+    def evaluate(self, vec_agent, vec_env, verbose=True, obs_normalizer=None):
         '''
         Evaluate all agents for one episode
         :param vec_agent: Vectorized agents for vectorized inference
@@ -416,9 +419,9 @@ class PPO:
         measures_acc = torch.zeros((num_steps, vec_env.num_envs, self.cfg.num_dims)).to(self.device)
         measures = torch.zeros((vec_env.num_envs, self.cfg.num_dims)).to(self.device)
 
-        if self.cfg.normalize_obs:
-            obs_mean = self.vec_inference.obs_normalizer.obs_rms.mean.to(self.device)
-            obs_var = self.vec_inference.obs_normalizer.obs_rms.var.to(self.device)
+        if self.cfg.normalize_obs and obs_normalizer is not None:
+            obs_mean = obs_normalizer.obs_rms.mean.to(self.device)
+            obs_var = obs_normalizer.obs_rms.var.to(self.device)
 
         while not torch.all(dones):
             with torch.no_grad():
@@ -451,6 +454,10 @@ class PPO:
         mean_reward = np.mean(total_reward)
         mean_traj_length = torch.mean(traj_lengths.to(torch.float64)).detach().cpu().numpy().item()
         objective_measures = np.concatenate((total_reward.reshape(-1, 1), measures), axis=1)
+
+        if self.cfg.normalize_obs:
+            for i, data in enumerate(metadata):
+                data['obs_normalizer'] = obs_normalizer
 
         if verbose:
             np.set_printoptions(suppress=True)
