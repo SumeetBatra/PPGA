@@ -75,6 +75,7 @@ def evaluate(vec_agent, vec_env, num_dims, deterministic=True):
                 acts = vec_agent(obs)
             else:
                 acts, _, _ = vec_agent.get_action(obs)
+            acts = acts.to(torch.float32)
             obs, rew, next_dones, infos = vec_env.step(acts)
             measures_acc[traj_length] = infos['measures']
             obs = obs.to(device)
@@ -143,7 +144,7 @@ def reevaluate_archive(archive_df, env_cfg):
     save_heatmap(new_archive, heatmap_path)
 
 
-def evaluate_pga_me_archive(checkpoint_dir):
+def load_pga_me_archive(checkpoint_dir):
     '''
     Convert a qdax checkpoint into a ribs archive
     :param checkpoint_dir: directory to find the centroids, descriptors, and gentoypes files
@@ -155,6 +156,45 @@ def evaluate_pga_me_archive(checkpoint_dir):
     descriptors = np.load(descriptors_fp)
     fitnesses = np.load(fitnesses_fp)
     genotypes = np.load(genotypes_fp)
+
+    active_inds = np.where(fitnesses != -np.inf)
+    descriptors = descriptors[active_inds]
+    fitnesses = fitnesses[active_inds]
+    genotypes = genotypes[active_inds]
+
+    archive_dims = [10, 10, 10, 10]
+    num_dims = 4
+    seed = 1111
+    bounds = [(0., 1.0) for _ in range(num_dims)]
+    archive = GridArchive(solution_dim=genotypes.shape[1],
+                          dims=archive_dims,
+                          ranges=bounds,
+                          threshold_min=-np.inf,
+                          seed=seed)
+    archive.add(genotypes,
+                fitnesses,
+                descriptors)
+    return archive
+
+
+
+def evaluate_pga_me_archive(checkpoint_dir):
+    '''
+    Convert a qdax checkpoint into a ribs archive and evaluate it
+    :param checkpoint_dir: directory to find the centroids, descriptors, and gentoypes files
+    '''
+    descriptors_fp = os.path.join(checkpoint_dir, 'descriptors.npy')
+    fitnesses_fp = os.path.join(checkpoint_dir, 'fitnesses.npy')
+    genotypes_fp = os.path.join(checkpoint_dir, 'genotypes.npy')
+
+    descriptors = np.load(descriptors_fp)
+    fitnesses = np.load(fitnesses_fp)
+    genotypes = np.load(genotypes_fp)
+
+    active_inds = np.where(fitnesses != -np.inf)
+    descriptors = descriptors[active_inds]
+    fitnesses = fitnesses[active_inds]
+    genotypes = genotypes[active_inds]
 
     env_cfg = AttrDict({'env_name': 'walker2d', 'num_dims': 2, 'seed': 0})
     env_cfg.env_batch_size = genotypes.shape[0]
@@ -191,6 +231,6 @@ def load_and_eval_archive(archive_path):
 
 
 if __name__ == '__main__':
-    evaluate_pga_me_archive('/home/sumeet/QDax/experiments/pga_me_reproduce/checkpoints/checkpoint_00729')
+    evaluate_pga_me_archive('/home/sumeet/QDax/experiments/walker2d_checkpoint/checkpoint_00731')
     # load_and_eval_archive('/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0/checkpoints/cp_00000670/archive_00000670.pkl')
 
