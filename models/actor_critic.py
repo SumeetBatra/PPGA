@@ -56,7 +56,10 @@ class PGAMEActor(nn.Module):
         self.actor_logstd = -100.0 * torch.ones(action_shape[0])
 
     def forward(self, obs):
-        return self.network(obs)
+        return self.actor_mean(obs)
+
+    def get_action(self, obs):
+        return self.forward(obs)
 
     def serialize(self):
         '''

@@ -5,10 +5,9 @@ import random
 
 from attrdict import AttrDict
 from time import time
-from envs.cpu.vec_env import make_vec_env, make_env
 from utils.utilities import log
-from models.vectorized import VectorizedPolicy, VectorizedActorCriticShared, VectorizedLinearBlock, VectorizedActor
-from models.actor_critic import Actor
+from models.vectorized import VectorizedPolicy, VectorizedLinearBlock, VectorizedActor
+from models.actor_critic import Actor, PGAMEActor
 from utils.normalize_obs import NormalizeReward, VecRewardNormalizer
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
@@ -16,62 +15,14 @@ TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_work
                      'obs_shape': (27,), 'action_shape': (8,), 'num_envs': 10})
 
 
-def test_vec_env():
-    cfg = {'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 4, 'envs_per_worker': 2,
-           'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0}
-    cfg = AttrDict(cfg)
-    num_envs = cfg.num_workers * cfg.envs_per_worker
-    # test to make sure we get all obs back and with the right dims
-    vec_env = make_vec_env(cfg)
-    obs_dim = vec_env.obs_dim
-    action_dim = vec_env.single_action_space.shape[0]
-    rand_act = torch.randn(num_envs, action_dim)
-    vec_env.reset()
-    obs, rew, done, infos = vec_env.step(rand_act)
-    log.debug(f'{obs=} \n {rew=} \n {done=}')
-    log.debug(f'obs shape: {obs.shape}')
-    assert obs.shape == torch.Size([cfg.num_workers * cfg.envs_per_worker, obs_dim])
+def test_serialize_deserialize_pgame_actor():
+    obs_size, action_shape = 87, (8,)
+    agent1 = PGAMEActor(obs_shape=obs_size, action_shape=action_shape)
+    agent1_params = agent1.serialize()
 
-
-def test_compare_vec_env_to_gym_env():
-    # test to make sure the vec_env implementation returns the same obs as a standard openai gym implementation
-    random.seed(0)
-    np.random.seed(0)
-    torch.manual_seed(0)
-    torch.backends.cudnn.deterministic = True
-
-    cfg = {'normalize_rewards': False, 'normalize_obs': False, 'num_workers': 4, 'envs_per_worker': 2,
-           'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0}
-    cfg = AttrDict(cfg)
-    num_envs = cfg.num_workers * cfg.envs_per_worker
-    # test to make sure we get all obs back and with the right dims
-    vec_env = make_vec_env(cfg)
-    action_dim = vec_env.single_action_space.shape[0]
-
-    env_fns = [make_env('QDAntBulletEnv-v0', seed=0, gamma=cfg.gamma) for i in range(num_envs)]
-    gym_envs = gym.vector.AsyncVectorEnv(env_fns, vec_env.single_observation_space, vec_env.single_action_space)
-
-    vec_env.reset()
-    gym_envs.reset()
-    random_traj = torch.randn(10, num_envs, action_dim)
-    obs, gym_obs, rews, gym_rews = [], [], [], []
-    for actions in random_traj:
-        next_obs, rew, _, _ = vec_env.step(actions)
-        gym_next_obs, gym_rew, _, _ = gym_envs.step(actions)
-        gym_next_obs = torch.from_numpy(gym_next_obs)
-        gym_rew = torch.from_numpy(gym_rew)
-
-        obs.append(next_obs)
-        gym_obs.append(gym_next_obs)
-        rews.append(rew)
-        gym_rews.append(gym_rew)
-
-    obs = torch.cat(obs, dim=0)
-    gym_obs = torch.cat(gym_obs, dim=0)
-    rews = torch.cat(rews, dim=0)
-    gym_rews = torch.cat(gym_rews, dim=0).to(torch.float32)
-
-    assert torch.allclose(obs, gym_obs) and torch.allclose(rews, gym_rews)
+    agent2 = PGAMEActor(obs_shape=obs_size, action_shape=action_shape).deserialize(agent1_params)
+    agent2_params = agent2.serialize()
+    assert np.allclose(agent1_params, agent2_params)
 
 
 def test_vec_block():

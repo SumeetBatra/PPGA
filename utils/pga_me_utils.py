@@ -10,7 +10,6 @@ from qdax import environments
 from qdax.types import Genotype
 from qdax.core.containers.mapelites_repertoire import MapElitesRepertoire
 from jax._src.flatten_util import ravel_pytree
-from utils.archive_utils import load_pga_me_archive
 
 from models.actor_critic import PGAMEActor
 from ribs.archives import GridArchive
@@ -18,7 +17,7 @@ from ribs.archives import GridArchive
 
 def pgame_repertoire_to_pyribs_archive(cp_path):
     # define the environment
-    env_name = 'walker2d_uni'
+    env_name = 'ant_uni'
     seed = 1111
     episode_length = 1000
     env = environments.create(env_name, episode_length=episode_length)
@@ -57,8 +56,8 @@ def pgame_repertoire_to_pyribs_archive(cp_path):
         pytorch_model = PGAMEActor(obs_shape=env.observation_size, action_shape=(env.action_size,))
         pytorch_params = dict(pytorch_model.named_parameters())
         for i in range(len(flax_params)):
-            pytorch_params[f'actor_mean.{2*i}.weight'].data = torch.from_numpy(flax_params[f'Dense_{i}']['kernel'][model_idx]._value.T)
-            pytorch_params[f'actor_mean.{2*i}.bias'].data = torch.from_numpy(flax_params[f'Dense_{i}']['bias'][model_idx]._value.T)
+            pytorch_params[f'actor_mean.{2*i}.weight'].data = torch.from_numpy(flax_params[f'Dense_{i}']['kernel'][model_idx]._value.T.copy())
+            pytorch_params[f'actor_mean.{2*i}.bias'].data = torch.from_numpy(flax_params[f'Dense_{i}']['bias'][model_idx]._value.T.copy())
         return pytorch_model.serialize()
 
     solution_batch = []
@@ -69,8 +68,8 @@ def pgame_repertoire_to_pyribs_archive(cp_path):
     obj_batch = np.array(repertoire.fitnesses[active_inds])
     measures_batch = np.array(repertoire.descriptors[active_inds])
 
-    archive_dims = [100, 100]
-    num_dims = 2
+    archive_dims = [10, 10, 10, 10]
+    num_dims = 4
     seed = 1111
     bounds = [(0., 1.0) for _ in range(num_dims)]
     archive = GridArchive(solution_dim=solution_batch.shape[1],
@@ -90,7 +89,7 @@ if __name__ == '__main__':
     # elites = archive_df.query("objective > 5000").sort_values("objective", ascending=False)
     # pass
 
-    cp_path = '/home/sumeet/QDax/experiments/walker2d_checkpoint/checkpoint_00731/'
+    cp_path = '/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399/'
     archive = pgame_repertoire_to_pyribs_archive(cp_path)
     archive_df = archive.as_pandas(include_solutions=True)
     archive_df.to_pickle(cp_path + 'ribs_archive.pkl')
