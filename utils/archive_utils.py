@@ -105,6 +105,74 @@ def evaluate(vec_agent, vec_env, num_dims, deterministic=True):
 
 
 def reevaluate_archive(archive_df, env_cfg):
+    # if the archive size causes OOM errors, use this instead. Will be slower and less efficient
+    solutions = archive_df.filter(like='solution').to_numpy()
+    num_sols = solutions.shape[0]
+    env_cfg.env_batch_size = 1000
+    vec_env = make_vec_env_brax(env_cfg)
+
+    obs_shape, action_shape = vec_env.single_observation_space.shape, vec_env.single_action_space.shape
+    device = torch.device('cuda')
+    cfg = AttrDict({'normalize_obs': False, 'normalize_rewards': False, 'num_envs': num_sols, 'num_dims': env_cfg.num_dims})
+
+
+    all_objs, all_measures = [],  []
+    for i in range(0, num_sols-100, 100):
+        sol_batch = solutions[i: i + 100]
+        print(f'Evaluating solution batch {i}')
+        agents = [PGAMEActor(obs_shape=obs_shape[0], action_shape=action_shape).deserialize(sol).to(device) for sol in sol_batch]
+        vec_inference = VectorizedActor(cfg, agents, PGAMEActor, obs_shape=obs_shape, action_shape=action_shape).to(device)
+        objs, measures = evaluate(vec_inference, vec_env, env_cfg.num_dims)
+        all_objs.append(objs)
+        all_measures.append(measures)
+
+    # get the last uneven batch
+    batch_size = num_sols % 100
+    solution_batch = solutions[-batch_size:]
+    print(f'{len(solution_batch)=}')
+    env_cfg.env_batch_size = batch_size * 10
+    del vec_env
+    vec_env = make_vec_env_brax(env_cfg)
+    agents = [PGAMEActor(obs_shape=obs_shape[0], action_shape=action_shape).deserialize(sol).to(device) for sol in solution_batch]
+    vec_inference = VectorizedActor(cfg, agents, PGAMEActor, obs_shape=obs_shape, action_shape=action_shape).to(device)
+    objs, measures = evaluate(vec_inference, vec_env, env_cfg.num_dims)
+    all_objs.append(objs)
+    all_measures.append(measures)
+
+    all_objs, all_measures = np.concatenate(all_objs).reshape(1, -1).mean(axis=0), \
+        np.concatenate(all_measures).reshape(1, -1, env_cfg.num_dims).mean(axis=0)
+
+    print(f'{all_objs.shape=}, {all_measures.shape=}')
+
+    # create a new archive
+    archive_dims = [10, 10, 10, 10]
+    bounds = [(0., 1.0) for _ in range(cfg.num_dims)]
+    new_archive = GridArchive(solution_dim=solutions.shape[1],
+                              dims=archive_dims,
+                              ranges=bounds,
+                              threshold_min=0.0,
+                              seed=env_cfg.seed)
+    # add the re-evaluated solutions to the new archive
+    new_archive.add(
+        solutions,
+        all_objs,
+        all_measures
+    )
+    print(f'Re-evaluated Archive \n'
+          f'Coverage: {new_archive.stats.coverage} \n'
+          f'Max fitness: {new_archive.stats.obj_max}')
+
+    if cfg.num_dims <= 2:
+        # save a heatmap of the new archive
+        experiment_dir = '/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0'
+        analysis_dir = os.path.join(experiment_dir, 'post_hoc_analysis')
+        if not os.path.exists(analysis_dir):
+            os.mkdir(analysis_dir)
+        heatmap_path = os.path.join(analysis_dir, 'new_archive_heatmap.png')
+        save_heatmap(new_archive, heatmap_path)
+
+
+def batch_reevaluate_archive(archive_df, env_cfg):
     solutions = archive_df.filter(like='solution').to_numpy()
     num_sols = solutions.shape[0]
     env_cfg.env_batch_size = num_sols
@@ -120,7 +188,7 @@ def reevaluate_archive(archive_df, env_cfg):
         agents.append(agent)
     vec_inference = VectorizedActor(cfg, agents, Actor, obs_shape=obs_shape, action_shape=action_shape).to(device)
     all_objs, all_measures = [], []
-    num_iters = 1
+    num_iters = 5
     for _ in range(num_iters):
         objs, measures = evaluate(vec_inference, vec_env, env_cfg.num_dims)
         all_objs.append(objs)
@@ -142,14 +210,18 @@ def reevaluate_archive(archive_df, env_cfg):
         all_objs,
         all_measures
     )
+    print(f'Re-evaluated Archive \n'
+          f'Coverage: {new_archive.stats.coverage} \n'
+          f'Max fitness: {new_archive.stats.obj_max}')
 
-    # save a heatmap of the new archive
-    experiment_dir = '/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0'
-    analysis_dir = os.path.join(experiment_dir, 'post_hoc_analysis')
-    if not os.path.exists(analysis_dir):
-        os.mkdir(analysis_dir)
-    heatmap_path = os.path.join(analysis_dir, 'new_archive_heatmap.png')
-    save_heatmap(new_archive, heatmap_path)
+    if cfg.num_dims <= 2:
+        # save a heatmap of the new archive
+        experiment_dir = '/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0'
+        analysis_dir = os.path.join(experiment_dir, 'post_hoc_analysis')
+        if not os.path.exists(analysis_dir):
+            os.mkdir(analysis_dir)
+        heatmap_path = os.path.join(analysis_dir, 'new_archive_heatmap.png')
+        save_heatmap(new_archive, heatmap_path)
 
 
 def pgame_repertoire_to_pyribs_archive(cp_path):
@@ -259,11 +331,11 @@ def evaluate_pga_me_archive(archive_dir):
 
 def load_and_eval_archive(archive_path):
     archive_df = load_archive(archive_path)
-    env_cfg = AttrDict({'env_name': 'walker2d', 'num_dims': 2, 'seed': 1111})
+    env_cfg = AttrDict({'env_name': 'ant', 'num_dims': 4, 'seed': 1111})
     reevaluate_archive(archive_df, env_cfg)
 
 
 if __name__ == '__main__':
-    evaluate_pga_me_archive('/home/sumeet/QDax/experiments/walker2d_checkpoint/checkpoint_00731')
-    # load_and_eval_archive('/home/sumeet/QDPPO/logs/method3_walker2d_evotorch_xnes/cma_maega/trial_0/checkpoints/cp_00000670/archive_00000670.pkl')
+    # evaluate_pga_me_archive('/home/sumeet/QDax/experiments/walker2d_checkpoint/checkpoint_00731')
+    load_and_eval_archive('/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399/ribs_archive.pkl')
 
