@@ -39,12 +39,6 @@ class PPO:
         self.mean_critic = Critic(self.obs_shape).to(self.device)
         self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
 
-        # brax env
-        from envs.brax_custom.brax_env import make_vec_env_brax
-        multi_eval_cfg = copy.deepcopy(cfg)
-        multi_eval_cfg.env_batch_size = 1200
-        self.multi_eval_env = make_vec_env_brax(multi_eval_cfg)
-
         # metrics for logging
         self.metric_last_n_window = 10
         self.episodic_returns = deque([], maxlen=self.metric_last_n_window)
@@ -395,7 +389,7 @@ class PPO:
             self.vec_inference = VectorizedActor(self.cfg, original_agent, Actor,
                                                  obs_shape=self.obs_shape,
                                                  action_shape=self.action_shape)
-            f, m, metadata = self.evaluate(self.vec_inference, self.multi_eval_env, obs_normalizer=original_obs_normalizer)
+            f, m, metadata = self.evaluate(self.vec_inference, self.vec_env, obs_normalizer=original_obs_normalizer)
             return f.reshape(self.vec_inference.num_models, ), \
                 m.reshape(self.vec_inference.num_models, -1), \
                 jacobian, \
