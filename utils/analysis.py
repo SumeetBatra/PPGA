@@ -6,11 +6,31 @@ import csv
 import pandas as pd
 import os
 import numpy as np
+import copy
 
 from utils.archive_utils import pgame_checkpoint_to_objective_df
 from attrdict import AttrDict
 
 plt.style.use('science')
+
+shared_params = {
+    'walker2d':
+        {
+            'objective_range': (0, 5000),
+            'objective_resolution': 100,
+            'archive_resolution': 2500,
+            'skip_len': 200,
+            'algorithm_name': 'cma_mae_100_0.01'
+        },
+    'halfcheetah':
+        {
+            'objective_range': (0, 9000),
+            'objective_resolution': 100,
+            'archive_resolution': 2500,
+            'skip_len': 200,
+            'algorithm_name': 'cma_mae_100_0.01'
+        }
+}
 
 
 def parse_args():
@@ -49,9 +69,9 @@ def compile_cdf(cfg, dataframes=None):
 
     all_data = np.vstack((x, mean, mean - stddev, mean + stddev))
     cdf = pd.DataFrame(all_data.T, columns=['Objective',
-                                           'Threshold Percentage (Mean)',
-                                           'Threshold Percentage (Min)',
-                                           'Threshold Percentage (Max)'])
+                                            'Threshold Percentage (Mean)',
+                                            'Threshold Percentage (Min)',
+                                            'Threshold Percentage (Max)'])
 
     return cdf
 
@@ -110,15 +130,17 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis):
     y_avg = data.filter(regex='Mean').to_numpy().flatten()
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
-    ax.plot(x, y_avg, linewidth=3.0)
+    ax.plot(x, y_avg, linewidth=3.0, label=cfg.algorithm)
     ax.fill_between(x, y_min, y_max, alpha=0.2)
     ax.set_xlim(cfg.objective_range)
     ax.set_yticks(np.arange(0, 101, 10.0))
     ax.set_xlabel("Objective")
     ax.set_ylabel(y_label)
+    ax.set_title(cfg.title)
+    ax.legend()
 
 
-def get_pgame_df(exp_dir):
+def get_pgame_df(exp_dir, save=False):
     out_dir = os.path.join(exp_dir, 'cdf_analysis')
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
@@ -129,7 +151,8 @@ def get_pgame_df(exp_dir):
         subdir = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
         df = pgame_checkpoint_to_objective_df(subdir)
         dataframes.append(df)
-        df.to_pickle(os.path.join(out_dir, f'scores_{seed}.pkl'))
+        if save:
+            df.to_pickle(os.path.join(out_dir, f'scores_{seed}.pkl'))
     return dataframes
 
 
@@ -145,35 +168,35 @@ def get_qdppo_df(exp_dir):
     return dataframes
 
 
-
-
 def plot_cdf_data():
     fig, axs = plt.subplots(1, 2, figsize=(8, 6))
 
-    shared_params = {
-        'objective_range': (0, 5000),
-        'objective_resolution': 100,
-        'archive_resolution': 2500,
-        'skip_len': 200,
-        'algorithm_name': 'cma_mae_100_0.01'
-    }
-
-    qdppo_cfg = AttrDict({
-        'archive_dir': 'experiments/paper_qdppo_walker2d',
+    qdppo_dirs = AttrDict({
+        'walker2d': 'experiments/paper_qdppo_walker2d',
+        'halfcheetah': 'experiments/paper_qdppo_halfcheetah',
     })
-    qdppo_cfg.update(shared_params)
 
-    pgame_cfg = AttrDict({
-        'archive_dir': '/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/cdf_analysis',
+    pgame_dirs = AttrDict({
+        'walker2d': '/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline',
+        'halfcheetah': '/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline'
     })
-    pgame_cfg.update(shared_params)
 
-    qdppo_dataframes = get_qdppo_df(qdppo_cfg.archive_dir)
-    qdppo_cdf = compile_cdf(qdppo_cfg, dataframes=qdppo_dataframes)
-    pgame_cdf = compile_cdf(pgame_cfg)
+    for i, ((exp_name, qdppo_dir), (_, pgame_dir)) in enumerate(zip(qdppo_dirs.items(), pgame_dirs.items())):
+        base_cfg = AttrDict(shared_params[exp_name])
+        base_cfg['title'] = exp_name
 
-    make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[0])
-    make_cdf_plot(pgame_cfg, pgame_cdf, axs[0])
+        qdppo_cfg = copy.copy(base_cfg)
+        qdppo_cfg.update({'archive_dir': qdppo_dir, 'algorithm': 'QDPPO'})
+        qdppo_dataframes = get_qdppo_df(qdppo_dir)
+        qdppo_cdf = compile_cdf(qdppo_cfg, dataframes=qdppo_dataframes)
+
+        pgame_cfg = copy.copy(base_cfg)
+        pgame_cfg.update({'archive_dir': pgame_dir, 'algorithm': 'PGA-ME'})
+        pgame_dataframes = get_pgame_df(pgame_dir)
+        pgame_cdf = compile_cdf(pgame_cfg, dataframes=pgame_dataframes)
+
+        make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[i])
+        make_cdf_plot(pgame_cfg, pgame_cdf, axs[i])
 
     plt.show()
 
@@ -181,5 +204,5 @@ def plot_cdf_data():
 if __name__ == '__main__':
     # args = parse_args()
     # plot_qd_results(args)
-    get_qdppo_df('/home/sumeet/QDPPO/experiments/paper_qdppo_walker2d')
+    # get_qdppo_df('/home/sumeet/QDPPO/experiments/paper_qdppo_walker2d')
     plot_cdf_data()
