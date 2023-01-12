@@ -199,16 +199,17 @@ class PPO:
                     )
                     v_loss_clipped = (v_clipped - b_returns[:, mb_inds].flatten()) ** 2
                     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    v_loss = 0.5 * v_loss_max.mean()
+                    v_loss = v_loss_max.mean()
                 else:
-                    v_loss = 0.5 * ((newvalue - b_returns[:, mb_inds].flatten()) ** 2).mean()
+                    v_loss = ((newvalue - b_returns[:, mb_inds].flatten()) ** 2).mean()
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
 
-                self.vec_optimizer.zero_grad()
-                self.qd_critic_optim.zero_grad()
-                self.mean_critic_optim.zero_grad()
+                for (p1, p2, p3) in zip(self.vec_inference.parameters(), self.mean_critic.parameters(), self.qd_critic.parameters()):
+                    p1.grad = None
+                    p2.grad = None
+                    p3.grad = None
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.vec_inference.parameters(), self.cfg.max_grad_norm)
                 self.vec_optimizer.step()
@@ -442,7 +443,10 @@ class PPO:
             axis=1)
         avg_traj_lengths = traj_lengths.to(torch.float32).reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).\
             mean(dim=1).cpu().numpy()
-        metadata = np.array([{'traj_length': t} for t in avg_traj_lengths]).reshape(-1,)
+        metadata = np.array([{'traj_length': t,
+                              'mean_critic_params': self.mean_critic.serialize(),
+                              'qd_critic_params': self.qd_critic.serialize()}
+                             for t in avg_traj_lengths]).reshape(-1,)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)

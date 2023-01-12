@@ -13,16 +13,14 @@ class RunningMeanStd(nn.Module):
         # TODO: these should be float64. Fix this
         self.register_buffer('mean', torch.zeros(shape, dtype=torch.float32))
         self.register_buffer('var', torch.ones(shape, dtype=torch.float32))
-        self.count = epsilon
+        self.register_buffer('count', torch.ones([1], dtype=torch.float32))
 
     def update(self, x):
         """ update from a batch of samples"""
         batch_mean = torch.mean(x, dim=0)
         batch_var = torch.var(x, dim=0)
         batch_count = x.shape[0]
-        self.mean, self.var, self.count = self.update_from_moments(batch_mean, batch_var, batch_count)
-        self.get_buffer('mean')[:] = self.mean
-        self.get_buffer('var')[:] = self.var
+        self.mean[:], self.var[:], self.count[:] = self.update_from_moments(batch_mean, batch_var, batch_count)
 
     def update_from_moments(self, batch_mean, batch_var, batch_count):
         batch_mean = batch_mean.to(self.mean.device)
@@ -58,7 +56,8 @@ class NormalizeObservation(nn.Module):
         self.epsilon = epsilon
 
     def forward(self, obs):
-        obs = self.normalize(obs)
+        with torch.no_grad():
+            obs = self.normalize(obs)
         return obs
 
     def normalize(self, obs):
@@ -79,15 +78,16 @@ class NormalizeReward(nn.Module):
     def __init__(self, num_envs, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8):
         super(NormalizeReward, self).__init__()
         self.num_envs = num_envs
-        self.return_rms = RunningMeanStd(shape=())
+        self.return_rms = RunningMeanStd(shape=(reward_dim,))
         self.returns = torch.zeros((self.num_envs, reward_dim))
         self.gamma = gamma
         self.epsilon = epsilon
 
     def forward(self, rews, dones):
-        self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
-        rews = self.normalize(rews)
-        self.returns[dones.long()] = 0.0
+        with torch.no_grad():
+            self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
+            rews = self.normalize(rews)
+            self.returns[dones.long()] = 0.0
         return rews
 
     def normalize(self, rews):
