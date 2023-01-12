@@ -88,12 +88,56 @@ class PGAMEActor(nn.Module):
         return self
 
 
-class Critic(nn.Module):
+class CriticBase(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def load(self, filename):
+        self.load_state_dict(torch.load(filename, map_location=torch.device('cpu')))
+
+    def save(self, filename):
+        torch.save(self.state_dict(), filename)
+
+    # From DQDRL paper https://arxiv.org/pdf/2202.03666.pdf
+    def serialize(self):
+        '''
+        Returns a 1D numpy array view of the entire policy.
+        '''
+        return np.concatenate(
+            [p.data.cpu().detach().numpy().ravel() for p in self.parameters()])
+
+    def deserialize(self, array: np.ndarray):
+        '''
+        Update the weights of this policy with the weights from the 1D
+        array of parameters
+        '''
+        """Loads parameters from 1D array."""
+        array = np.copy(array)
+        arr_idx = 0
+        for param in self.parameters():
+            shape = tuple(param.data.shape)
+            length = np.product(shape)
+            block = array[arr_idx:arr_idx + length]
+            if len(block) != length:
+                raise ValueError("Array not long enough!")
+            block = np.reshape(block, shape)
+            arr_idx += length
+            param.data = torch.from_numpy(block).float()
+        return self
+
+    def gradient(self):
+        '''Returns 1D numpy array view of the gradients of this actor'''
+        return np.concatenate(
+            [p.grad.cpu().detach().numpy().ravel() for p in self.parameters()]
+        )
+
+
+class Critic(CriticBase):
     def __init__(self, obs_shape):
         '''
         Standard critic used in PPO. Used to move the mean solution point
         '''
-        super().__init__()
+        CriticBase.__init__(self)
         self.core = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 256)),
             nn.Tanh(),
@@ -112,7 +156,7 @@ class Critic(nn.Module):
         return self.get_value(obs)
 
 
-class QDCritic(nn.Module):
+class QDCritic(CriticBase):
     def __init__(self,
                  obs_shape: Union[int, tuple],
                  measure_dim: int,
@@ -123,7 +167,7 @@ class QDCritic(nn.Module):
         :param measure_dim: number of measures
         :param critics_list: Use this to pass in existing pre-trained critics
         '''
-        super(QDCritic, self).__init__()
+        CriticBase.__init__(self)
         self.measure_dim = measure_dim
         if critics_list is None:
             self.all_critics = nn.ModuleList([
