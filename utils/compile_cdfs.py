@@ -68,7 +68,7 @@ def make_cdf_plot(cfg, plot_dir):
 
     y_label = "Threshold Percentage"
 
-    plt.figure(figsize=(12, 12))
+    plt.figure(figsize=(16, 12))
 
     # Color mapping for algorithms
     palette = {
@@ -96,7 +96,7 @@ def make_cdf_plot(cfg, plot_dir):
         # plt.xticks([96, 98, 100])
         # plt.xticks([0, 50, 100])
 
-        plt.yticks([0, 100])
+        plt.yticks(np.arange(0, 101, 10.0))
         plt.xlabel("Objective")
         plt.ylabel(y_label)
 
@@ -112,9 +112,8 @@ def make_cdf_plot(cfg, plot_dir):
         sns_plot.figure.savefig(image_filepath)
 
 
-if __name__ == '__main__':
-    cfg = parse_args()
-    num_cells = np.prod(tuple(cfg.archive_resolution))
+def compile_cdf(cfg):
+    num_cells = cfg.archive_resolution
 
     # Compile all the data
     all_data = []
@@ -127,7 +126,7 @@ if __name__ == '__main__':
         if algo_name not in name_mapping:
             continue
         algo_name = name_mapping[algo_name]
-        _, trial_id = re.split('cp_', trial_name)
+        _, trial_id = re.split('cp_|checkpoint_', trial_name)
         print(algo_name, trial_id)
 
         df = pd.read_pickle(archive_filename)
@@ -159,6 +158,12 @@ if __name__ == '__main__':
     all_data.insert(0,
                     ['Algorithm', 'Trial', 'Objective', 'Threshold Percentage']
                     )
+    return all_data
+
+
+if __name__ == '__main__':
+    cfg = parse_args()
+    cdf_data = compile_cdf(cfg)
 
     # Output the summary of summary files.
     plot_dir = os.path.join(cfg.experiment_path, 'plots')
@@ -167,7 +172,7 @@ if __name__ == '__main__':
     archive_summary_fp = os.path.join(plot_dir, cfg.archive_summary_filename)
     with open(archive_summary_fp, 'w') as summary_file:
         writer = csv.writer(summary_file)
-        for datum in all_data:
+        for datum in cdf_data:
             writer.writerow(datum)
 
     make_cdf_plot(cfg, plot_dir)

@@ -1,3 +1,4 @@
+import pandas
 import torch
 import os
 import pickle
@@ -226,7 +227,7 @@ def batch_reevaluate_archive(archive_df, env_cfg):
 
 def pgame_repertoire_to_pyribs_archive(cp_path):
     # define the environment
-    env_name = 'ant_uni'
+    env_name = 'walker2d_uni'
     seed = 1111
     episode_length = 1000
     env = environments.create(env_name, episode_length=episode_length)
@@ -277,19 +278,27 @@ def pgame_repertoire_to_pyribs_archive(cp_path):
     obj_batch = np.array(repertoire.fitnesses[active_inds])
     measures_batch = np.array(repertoire.descriptors[active_inds])
 
-    archive_dims = [10, 10, 10, 10]
-    num_dims = 4
-    seed = 1111
+    archive_dims = [50, 50]
+    num_dims = 2
     bounds = [(0., 1.0) for _ in range(num_dims)]
     archive = GridArchive(solution_dim=solution_batch.shape[1],
                           dims=archive_dims,
                           ranges=bounds,
                           threshold_min=-np.inf,
                           seed=seed)
-    archive.add(solution_batch, obj_batch, measures_batch)
+    # archive.add(solution_batch, obj_batch, measures_batch)
+    for s, f, m in zip(solution_batch, obj_batch, measures_batch):
+        archive.add_single(s, f, m)
     return archive
 
 
+def pgame_checkpoint_to_objective_df(cp_path):
+    fitness_fp = os.path.join(cp_path, 'fitnesses.npy')
+    fitnesses = np.load(fitness_fp)
+    fitnesses = fitnesses[np.where(fitnesses != -np.inf)]
+
+    df = pandas.DataFrame(fitnesses, columns=['objective'])
+    return df
 
 def evaluate_pga_me_archive(archive_dir):
     '''
@@ -337,5 +346,8 @@ def load_and_eval_archive(archive_path):
 
 if __name__ == '__main__':
     # evaluate_pga_me_archive('/home/sumeet/QDax/experiments/walker2d_checkpoint/checkpoint_00731')
-    load_and_eval_archive('/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399/ribs_archive.pkl')
-
+    # load_and_eval_archive('/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399/ribs_archive.pkl')
+    cp_path = '/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline_seed_1111_v2/checkpoints/checkpoint_00399'
+    # archive = pgame_repertoire_to_pyribs_archive(cp_path)
+    # archive.as_pandas().to_pickle(cp_path + 'pgame_archive.pkl')
+    pgame_checkpoint_to_objective_df(cp_path)
