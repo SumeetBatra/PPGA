@@ -5,8 +5,8 @@
 # ENV_NAME: which environment to run on (see qdax/environments/__init__.py for a list of all runnable envs)
 # then from the project root dir you can run ./scripts/train_pga_me.sh
 
-ENV_NAME="humanoid"
-GRID_SIZE=50  # number of cells per archive dimension
+ENV_NAME="ant"
+GRID_SIZE=10  # number of cells per archive dimension
 SEED=1111
 
 
@@ -15,29 +15,27 @@ echo $RUN_NAME
 python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --rollout_length=128 \
                                 --use_wandb=True \
-                                --wandb_group=paper \
-                                --num_dims=2 \
                                 --seed=$SEED \
-                                --anneal_lr=False \
+                                --wandb_group=paper \
+                                --num_dims=4 \
                                 --num_minibatches=8 \
                                 --update_epochs=4 \
-                                --normalize_obs=True \
+                                --normalize_obs=False \
                                 --normalize_rewards=True \
-                                --wandb_run_name=$RUN_NAME\
-                                --popsize=300 \
-                                --env_batch_size=3000 \
-                                --learning_rate=0.0003 \
+                                --wandb_run_name=$RUN_NAME \
+                                --popsize=400 \
+                                --env_batch_size=4000 \
+                                --learning_rate=0.001 \
                                 --vf_coef=2 \
-                                --entropy_coef=0.0 \
-                                --target_kl=0.008 \
                                 --max_grad_norm=1 \
+                                --torch_deterministic=False \
                                 --total_iterations=2000 \
                                 --dqd_algorithm=cma_maega \
-                                --sigma0=0.5 \
-                                --restart_rule=no_improvement \
                                 --calc_gradient_iters=10 \
                                 --move_mean_iters=10 \
-                                --archive_lr=0.1 \
-                                --threshold_min=200 \
+                                --archive_lr=1.0 \
+                                --restart_rule=no_improvement \
+                                --sigma0=3.0 \
+                                --threshold_min=-10000 \
                                 --grid_size=$GRID_SIZE \
                                 --logdir=./experiments/paper_qdppo_$ENV_NAME
