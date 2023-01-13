@@ -443,10 +443,7 @@ class PPO:
             axis=1)
         avg_traj_lengths = traj_lengths.to(torch.float32).reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).\
             mean(dim=1).cpu().numpy()
-        metadata = np.array([{'traj_length': t,
-                              'mean_critic_params': self.mean_critic.serialize(),
-                              'qd_critic_params': self.qd_critic.serialize()}
-                             for t in avg_traj_lengths]).reshape(-1,)
+        metadata = np.array([{'traj_length': t} for t in avg_traj_lengths]).reshape(-1,)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)

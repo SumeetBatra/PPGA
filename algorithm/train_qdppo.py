@@ -338,8 +338,10 @@ def run_experiment(cfg: AttrDict,
             log.debug("Emitter restarted. Changing the mean agent...")
             mean_soln_point = scheduler.emitters[0].theta
             mean_agents = [Actor(cfg, obs_shape, action_shape).deserialize(mean_soln_point).to(device)]
+            # load the obs normalizer used for the mean agent
             if cfg.normalize_obs:
                 mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
+            # reset the std-devs
             for agent in mean_agents:
                 agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
@@ -396,8 +398,8 @@ def run_experiment(cfg: AttrDict,
             with open(os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl'), 'wb') as f:
                 pickle.dump(scheduler, f)
 
-            # save the top 3 checkpoints, delete older ones
-            while len(get_checkpoints(str(cp_dir))) > 3:
+            # save the top 1 checkpoints, delete older ones
+            while len(get_checkpoints(str(cp_dir))) > 1:
                 oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
                 if os.path.exists(oldest_checkpoint):
                     log.info(f'Removing checkpoint {oldest_checkpoint}')
