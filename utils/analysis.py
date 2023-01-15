@@ -29,6 +29,14 @@ shared_params = {
             'archive_resolution': 2500,
             'skip_len': 200,
             'algorithm_name': 'cma_mae_100_0.01'
+        },
+    'humanoid':
+        {
+            'objective_range': (0, 10000),
+            'objective_resolution': 11,
+            'archive_resolution': 2500,
+            'skip_len': 200,
+            'algorithm_name': 'cma_mae_100_0.01'
         }
 }
 
@@ -169,16 +177,18 @@ def get_qdppo_df(exp_dir):
 
 
 def plot_cdf_data():
-    fig, axs = plt.subplots(1, 2, figsize=(8, 6))
+    fig, axs = plt.subplots(2, 2, figsize=(8, 6))
 
     qdppo_dirs = AttrDict({
         'walker2d': 'experiments/paper_qdppo_walker2d',
         'halfcheetah': 'experiments/paper_qdppo_halfcheetah',
+        'humanoid': 'experiments/paper_qdppo_humanoid',
     })
 
     pgame_dirs = AttrDict({
         'walker2d': '/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline',
-        'halfcheetah': '/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline'
+        'halfcheetah': '/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline',
+        'humanoid': '/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline'
     })
 
     for i, ((exp_name, qdppo_dir), (_, pgame_dir)) in enumerate(zip(qdppo_dirs.items(), pgame_dirs.items())):
@@ -195,9 +205,11 @@ def plot_cdf_data():
         pgame_dataframes = get_pgame_df(pgame_dir)
         pgame_cdf = compile_cdf(pgame_cfg, dataframes=pgame_dataframes)
 
-        make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[i])
-        make_cdf_plot(pgame_cfg, pgame_cdf, axs[i])
+        (j, k) = np.unravel_index(i, (2, 2))
+        make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[j][k])
+        make_cdf_plot(pgame_cfg, pgame_cdf, axs[j][k])
 
+    fig.tight_layout()
     plt.show()
 
 
