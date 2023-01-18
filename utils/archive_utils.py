@@ -307,17 +307,15 @@ def pgame_repertoire_to_pyribs_archive(cp_path, env_cfg, save_path=None):
     obj_batch = np.array(repertoire.fitnesses[active_inds])
     measures_batch = np.array(repertoire.descriptors[active_inds])
 
-    archive_dims = [50, 50]
-    num_dims = 2
+    archive_dims = [env_cfg.grid_size] * env_cfg.num_dims
+    num_dims = env_cfg.num_dims
     bounds = [(0., 1.0) for _ in range(num_dims)]
     archive = GridArchive(solution_dim=solution_batch.shape[1],
                           dims=archive_dims,
                           ranges=bounds,
                           threshold_min=-np.inf,
                           seed=seed)
-    # archive.add(solution_batch, obj_batch, measures_batch)
-    for s, f, m in zip(solution_batch, obj_batch, measures_batch):
-        archive.add_single(s, f, m)
+    archive.add(solution_batch, obj_batch, measures_batch)
 
     if save_path is not None:
         archive_fp = os.path.join(save_path, f'{env_name}_original_archive.pkl')

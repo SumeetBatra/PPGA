@@ -49,7 +49,7 @@ shared_params = {
     'humanoid':
         {
             'objective_range': (0, 10000),
-            'objective_resolution': 11,
+            'objective_resolution': 100,
             'archive_resolution': 2500,
             'skip_len': 200,
             'algorithm_name': 'cma_mae_100_0.01',
@@ -58,6 +58,20 @@ shared_params = {
                 'num_dims': 2,
                 'episode_length': 1000,
                 'grid_size': 50
+            }
+        },
+    'ant':
+        {
+            'objective_range': (0, 7000),
+            'objective_resolution': 100,
+            'archive_resolution': 10000,
+            'skip_len': 200,
+            'algorithm_name': 'cma_mae_100_0.01',
+            'env_cfg': {
+                'env_name': 'ant',
+                'num_dims': 4,
+                'episode_length': 1000,
+                'grid_size': 10,
             }
         }
 }
@@ -242,7 +256,8 @@ def visualize_reevaluated_archives():
     pgame_dirs = AttrDict({
         'walker2d': f'/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/',
         'halfcheetah': f'/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline/',
-        'humanoid': f'/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline/'
+        'humanoid': f'/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline/',
+        'ant': '/home/sumeet/QDax/experiments/pga_me_ant_uni_baseline/'
     })
 
     ppga_dirs = AttrDict({
