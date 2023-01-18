@@ -326,7 +326,8 @@ def run_experiment(cfg: AttrDict,
         branched_sols = scheduler.ask()
         branched_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in branched_sols]
         ppo.agents = branched_agents
-        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env, verbose=True, obs_normalizer=mean_agents[0].obs_normalizer)
+        eval_obs_normalizer = mean_agents[0].obs_normalizer if cfg.normalize_obs else None
+        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env, verbose=True, obs_normalizer=eval_obs_normalizer)
 
         if cfg.weight_decay:
             reg_loss = cfg.weight_decay * np.array([np.linalg.norm(sol) for sol in branched_sols]).reshape(objs.shape)
