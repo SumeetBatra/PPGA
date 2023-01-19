@@ -76,6 +76,19 @@ shared_params = {
         }
 }
 
+PGAME_DIRS = AttrDict({
+    'walker2d': f'/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/',
+    'halfcheetah': f'/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline/',
+    'humanoid': f'/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline/',
+    # 'ant': '/home/sumeet/QDax/experiments/pga_me_ant_uni_baseline/'
+})
+
+PPGA_DIRS = AttrDict({
+    'walker2d': './experiments/paper_qdppo_walker2d',
+    'halfcheetah': './experiments/paper_qdppo_halfcheetah',
+    'humanoid': './experiments/paper_qdppo_humanoid'
+})
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -184,7 +197,7 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis):
     ax.legend()
 
 
-def get_pgame_df(exp_dir, save=False):
+def get_pgame_df(exp_dir, reevaluated_archive=False, save=False):
     out_dir = os.path.join(exp_dir, 'cdf_analysis')
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
@@ -193,52 +206,53 @@ def get_pgame_df(exp_dir, save=False):
     dataframes = []
     for seed in seeds:
         subdir = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
-        df = pgame_checkpoint_to_objective_df(subdir)
+        if reevaluated_archive:
+            filepath = glob.glob(subdir + '/' + '*reeval_archive*')[0]
+            with open(filepath, 'rb') as f:
+                df = pickle.load(f).as_pandas()
+        else:
+            df = pgame_checkpoint_to_objective_df(subdir)
         dataframes.append(df)
         if save:
             df.to_pickle(os.path.join(out_dir, f'scores_{seed}.pkl'))
     return dataframes
 
 
-def get_qdppo_df(exp_dir):
+def get_qdppo_df(exp_dir, reevaluated_archive=False):
     seeds = [1111, 2222, 3333, 4444]
     dataframes = []
     for seed in seeds:
         subdir = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/cp_*'))[-1]  # gets the most recent checkpoint
-        filename = glob.glob(subdir + '/' + 'archive_*')[0]
-        df = pd.read_pickle(filename)
+        if reevaluated_archive:
+            filename = glob.glob(subdir + '/' + '*reeval_archive*')[0]
+            with open(filename, 'rb') as f:
+                df = pickle.load(f).as_pandas()
+        else:
+            filename = glob.glob(subdir + '/' + 'archive_*')[0]
+            df = pd.read_pickle(filename)
         dataframes.append(df)
 
     return dataframes
 
 
-def plot_cdf_data():
+def plot_cdf_data(reevaluated_archives=False):
     fig, axs = plt.subplots(2, 2, figsize=(8, 6))
+    subtitle = 'Archive CDFs'
+    prefix = 'Corrected ' if reevaluated_archives else ''
+    title = prefix + subtitle
 
-    qdppo_dirs = AttrDict({
-        'walker2d': 'experiments/paper_qdppo_walker2d',
-        'halfcheetah': 'experiments/paper_qdppo_halfcheetah',
-        'humanoid': 'experiments/paper_qdppo_humanoid',
-    })
-
-    pgame_dirs = AttrDict({
-        'walker2d': '/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline',
-        'halfcheetah': '/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline',
-        'humanoid': '/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline'
-    })
-
-    for i, ((exp_name, qdppo_dir), (_, pgame_dir)) in enumerate(zip(qdppo_dirs.items(), pgame_dirs.items())):
+    for i, ((exp_name, qdppo_dir), (_, pgame_dir)) in enumerate(zip(PPGA_DIRS.items(), PGAME_DIRS.items())):
         base_cfg = AttrDict(shared_params[exp_name])
         base_cfg['title'] = exp_name
 
         qdppo_cfg = copy.copy(base_cfg)
         qdppo_cfg.update({'archive_dir': qdppo_dir, 'algorithm': 'QDPPO'})
-        qdppo_dataframes = get_qdppo_df(qdppo_dir)
+        qdppo_dataframes = get_qdppo_df(qdppo_dir, reevaluated_archive=reevaluated_archives)
         qdppo_cdf = compile_cdf(qdppo_cfg, dataframes=qdppo_dataframes)
 
         pgame_cfg = copy.copy(base_cfg)
         pgame_cfg.update({'archive_dir': pgame_dir, 'algorithm': 'PGA-ME'})
-        pgame_dataframes = get_pgame_df(pgame_dir)
+        pgame_dataframes = get_pgame_df(pgame_dir, reevaluated_archive=reevaluated_archives)
         pgame_cdf = compile_cdf(pgame_cfg, dataframes=pgame_dataframes)
 
         (j, k) = np.unravel_index(i, (2, 2))
@@ -246,6 +260,7 @@ def plot_cdf_data():
         make_cdf_plot(pgame_cfg, pgame_cdf, axs[j][k])
 
     fig.tight_layout()
+    fig.suptitle(title)
     plt.show()
 
 
@@ -253,23 +268,10 @@ def visualize_reevaluated_archives():
     seed = 1111
     fig, axs = plt.subplots(2, 3, figsize=(10, 6))
 
-    pgame_dirs = AttrDict({
-        'walker2d': f'/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/',
-        'halfcheetah': f'/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline/',
-        'humanoid': f'/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline/',
-        'ant': '/home/sumeet/QDax/experiments/pga_me_ant_uni_baseline/'
-    })
-
-    ppga_dirs = AttrDict({
-        'walker2d': './experiments/paper_qdppo_walker2d',
-        'halfcheetah': './experiments/paper_qdppo_halfcheetah',
-        'humanoid': './experiments/paper_qdppo_humanoid'
-    })
-
     def load_and_eval_pgame_archive(exp_name, data_is_saved=False):
-        exp_dir = pgame_dirs[exp_name]
+        exp_dir = PGAME_DIRS[exp_name]
         cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
-        save_path = os.path.join(exp_dir, 'posthoc_analysis')
+        save_path = cp_path
         if not os.path.exists(save_path):
             os.mkdir(save_path)
 
@@ -277,14 +279,14 @@ def visualize_reevaluated_archives():
         env_cfg = base_cfg.env_cfg
         env_cfg.seed = seed
         if data_is_saved:
-            orig_archive_fp = os.path.join(save_path, f'{exp_name}_original_archive.pkl')
+            orig_archive_fp = glob.glob(save_path + '/' + '*original_archive*')[0]
             with open(orig_archive_fp, 'rb') as f:
                 original_archive = pickle.load(f)
 
             new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
             with open(new_archive_fp, 'rb') as f:
                 new_archive = pickle.load(f)
-            print(f'Re-evaluated PGAME Archive \n'
+            print(f'{exp_name} Re-evaluated PGAME Archive \n'
                   f'Coverage: {new_archive.stats.coverage} \n'
                   f'Max fitness: {new_archive.stats.obj_max} \n'
                   f'Avg Fitness: {new_archive.stats.obj_mean} \n'
@@ -295,9 +297,9 @@ def visualize_reevaluated_archives():
         return original_archive, new_archive
 
     def load_and_eval_ppga_archive(exp_name, data_is_saved=False):
-        exp_dir = ppga_dirs[exp_name]
+        exp_dir = PPGA_DIRS[exp_name]
         cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/cp_*'))[-1]  # gets the most recent checkpoint
-        save_path = os.path.join(exp_dir, 'posthoc_analysis')
+        save_path = cp_path
         if not os.path.exists(save_path):
             os.mkdir(save_path)
 
@@ -319,7 +321,7 @@ def visualize_reevaluated_archives():
             new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
             with open(new_archive_fp, 'rb') as f:
                 new_archive = pickle.load(f)
-            print(f'Re-evaluated PPGA Archive \n'
+            print(f'{exp_name} Re-evaluated PPGA Archive \n'
                   f'Coverage: {new_archive.stats.coverage} \n'
                   f'Max fitness: {new_archive.stats.obj_max} \n'
                   f'Avg Fitness: {new_archive.stats.obj_mean} \n'
@@ -329,7 +331,7 @@ def visualize_reevaluated_archives():
 
         return original_archive, new_archive
 
-    for i, exp_name in enumerate(pgame_dirs.keys()):
+    for i, exp_name in enumerate(PGAME_DIRS.keys()):
         _, new_pgame_archive = load_and_eval_pgame_archive(exp_name, data_is_saved=True)
         _, new_ppga_archive = load_and_eval_ppga_archive(exp_name, data_is_saved=True)
 
@@ -349,5 +351,5 @@ if __name__ == '__main__':
     # args = parse_args()
     # plot_qd_results(args)
     # get_qdppo_df('/home/sumeet/QDPPO/experiments/paper_qdppo_walker2d')
-    # plot_cdf_data()
+    # plot_cdf_data(reevaluated_archives=True)
     visualize_reevaluated_archives()
