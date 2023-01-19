@@ -264,76 +264,78 @@ def plot_cdf_data(reevaluated_archives=False):
     plt.show()
 
 
+def load_and_eval_pgame_archive(exp_name, seed, data_is_saved=False):
+    exp_dir = PGAME_DIRS[exp_name]
+    cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
+    save_path = cp_path
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
+
+    base_cfg = AttrDict(shared_params[exp_name])
+    env_cfg = base_cfg.env_cfg
+    env_cfg.seed = seed
+    if data_is_saved:
+        orig_archive_fp = glob.glob(save_path + '/' + '*original_archive*')[0]
+        with open(orig_archive_fp, 'rb') as f:
+            original_archive = pickle.load(f)
+
+        new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
+        with open(new_archive_fp, 'rb') as f:
+            new_archive = pickle.load(f)
+        print(f'{exp_name} Re-evaluated PGAME Archive \n'
+              f'Coverage: {new_archive.stats.coverage} \n'
+              f'Max fitness: {new_archive.stats.obj_max} \n'
+              f'Avg Fitness: {new_archive.stats.obj_mean} \n'
+              f'QD Score: {new_archive.offset_qd_score}')
+    else:
+        original_archive, pgame_sols = pgame_repertoire_to_pyribs_archive(cp_path + '/', env_cfg, save_path=save_path)
+        new_archive = reevaluate_pgame_archive(env_cfg, archive_df=original_archive.as_pandas(), save_path=save_path)
+    return original_archive, new_archive
+
+
+def load_and_eval_ppga_archive(exp_name, seed, data_is_saved=False):
+    exp_dir = PPGA_DIRS[exp_name]
+    cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/cp_*'))[-1]  # gets the most recent checkpoint
+    save_path = cp_path
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
+
+    base_cfg = AttrDict(shared_params[exp_name])
+    env_cfg = base_cfg.env_cfg
+    env_cfg.seed = seed
+
+    agent_cfg_fp = exp_dir + f'/{seed}/' + 'cfg.json'
+    with open(agent_cfg_fp, 'r') as f:
+        agent_cfg = json.load(f)
+        agent_cfg = AttrDict(agent_cfg)
+
+    scheduler_fp = glob.glob(cp_path + '/' + 'scheduler_*')[0]
+    with open(scheduler_fp, 'rb') as f:
+        scheduler = pickle.load(f)
+        original_archive = scheduler.archive
+
+    if data_is_saved:
+        new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
+        with open(new_archive_fp, 'rb') as f:
+            new_archive = pickle.load(f)
+        print(f'{exp_name} Re-evaluated PPGA Archive \n'
+              f'Coverage: {new_archive.stats.coverage} \n'
+              f'Max fitness: {new_archive.stats.obj_max} \n'
+              f'Avg Fitness: {new_archive.stats.obj_mean} \n'
+              f'QD Score: {new_archive.offset_qd_score}')
+    else:
+        new_archive = reevaluate_ppga_archive(env_cfg, agent_cfg=agent_cfg, original_archive=original_archive, save_path=save_path)
+
+    return original_archive, new_archive
+
+
 def visualize_reevaluated_archives():
     seed = 1111
     fig, axs = plt.subplots(2, 3, figsize=(10, 6))
 
-    def load_and_eval_pgame_archive(exp_name, data_is_saved=False):
-        exp_dir = PGAME_DIRS[exp_name]
-        cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
-        save_path = cp_path
-        if not os.path.exists(save_path):
-            os.mkdir(save_path)
-
-        base_cfg = AttrDict(shared_params[exp_name])
-        env_cfg = base_cfg.env_cfg
-        env_cfg.seed = seed
-        if data_is_saved:
-            orig_archive_fp = glob.glob(save_path + '/' + '*original_archive*')[0]
-            with open(orig_archive_fp, 'rb') as f:
-                original_archive = pickle.load(f)
-
-            new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
-            with open(new_archive_fp, 'rb') as f:
-                new_archive = pickle.load(f)
-            print(f'{exp_name} Re-evaluated PGAME Archive \n'
-                  f'Coverage: {new_archive.stats.coverage} \n'
-                  f'Max fitness: {new_archive.stats.obj_max} \n'
-                  f'Avg Fitness: {new_archive.stats.obj_mean} \n'
-                  f'QD Score: {new_archive.offset_qd_score}')
-        else:
-            original_archive, pgame_sols = pgame_repertoire_to_pyribs_archive(cp_path + '/', env_cfg, save_path=save_path)
-            new_archive = reevaluate_pgame_archive(env_cfg, archive_df=original_archive.as_pandas(), save_path=save_path)
-        return original_archive, new_archive
-
-    def load_and_eval_ppga_archive(exp_name, data_is_saved=False):
-        exp_dir = PPGA_DIRS[exp_name]
-        cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/cp_*'))[-1]  # gets the most recent checkpoint
-        save_path = cp_path
-        if not os.path.exists(save_path):
-            os.mkdir(save_path)
-
-        base_cfg = AttrDict(shared_params[exp_name])
-        env_cfg = base_cfg.env_cfg
-        env_cfg.seed = seed
-
-        agent_cfg_fp = exp_dir + f'/{seed}/' + 'cfg.json'
-        with open(agent_cfg_fp, 'r') as f:
-            agent_cfg = json.load(f)
-            agent_cfg = AttrDict(agent_cfg)
-
-        scheduler_fp = glob.glob(cp_path + '/' + 'scheduler_*')[0]
-        with open(scheduler_fp, 'rb') as f:
-            scheduler = pickle.load(f)
-            original_archive = scheduler.archive
-
-        if data_is_saved:
-            new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
-            with open(new_archive_fp, 'rb') as f:
-                new_archive = pickle.load(f)
-            print(f'{exp_name} Re-evaluated PPGA Archive \n'
-                  f'Coverage: {new_archive.stats.coverage} \n'
-                  f'Max fitness: {new_archive.stats.obj_max} \n'
-                  f'Avg Fitness: {new_archive.stats.obj_mean} \n'
-                  f'QD Score: {new_archive.offset_qd_score}')
-        else:
-            new_archive = reevaluate_ppga_archive(env_cfg, agent_cfg=agent_cfg, original_archive=original_archive, save_path=save_path)
-
-        return original_archive, new_archive
-
     for i, exp_name in enumerate(PGAME_DIRS.keys()):
-        _, new_pgame_archive = load_and_eval_pgame_archive(exp_name, data_is_saved=True)
-        _, new_ppga_archive = load_and_eval_ppga_archive(exp_name, data_is_saved=True)
+        _, new_pgame_archive = load_and_eval_pgame_archive(exp_name, seed, data_is_saved=True)
+        _, new_ppga_archive = load_and_eval_ppga_archive(exp_name, seed, data_is_saved=True)
 
         grid_archive_heatmap(new_pgame_archive, ax=axs[0][i])
         grid_archive_heatmap(new_ppga_archive, ax=axs[1][i])
@@ -345,6 +347,52 @@ def visualize_reevaluated_archives():
     plt.show()
 
 
+def print_corrected_qd_metrics():
+    seeds = [1111, 2222, 3333, 4444]
+    ppga_data = {'coverage': [],
+                 'obj_max': [],
+                 'obj_mean': [],
+                 'qd_score': [],
+                 'num_elites': [],
+                 'offset_qd_score': []}
+    pgame_data = copy.deepcopy(ppga_data)
+    final_ppga_data, final_pgame_data = {}, {}
+
+    for exp_name in PPGA_DIRS.keys():
+        # clear any old data and start fresh
+        for key in ppga_data.keys():
+            ppga_data[key] = []
+        for key in pgame_data.keys():
+            pgame_data[key] = []
+        for seed in seeds:
+            _, new_ppga_archive = load_and_eval_ppga_archive(exp_name, seed, data_is_saved=True)
+            _, new_pgame_archive = load_and_eval_pgame_archive(exp_name, seed, data_is_saved=True)
+
+            for name, val in new_ppga_archive.stats._asdict().items():
+                ppga_data[name].append(val)
+            # this is not in stats, so we need to add it manually
+            ppga_data['offset_qd_score'].append(new_ppga_archive.offset_qd_score)
+
+            for name, val in new_pgame_archive.stats._asdict().items():
+                pgame_data[name].append(val)
+            pgame_data['offset_qd_score'].append(new_pgame_archive.offset_qd_score)
+
+        # now that we've collected data from all seeds, we can average and put it into the final dict
+        final_ppga_data[exp_name] = {}
+        final_pgame_data[exp_name] = {}
+
+        for name, data in ppga_data.items():
+            final_ppga_data[exp_name][name] = np.mean(np.array(data))
+
+        for name, data in pgame_data.items():
+            final_pgame_data[exp_name][name] = np.mean(np.array(data))
+
+    # once we've done this for all experiments, we can print the final result
+    for exp_name, data in final_ppga_data.items():
+        print(f'PPGA {exp_name}: Averaged Results: {data}')
+
+    for exp_name, data in final_pgame_data.items():
+        print(f'PGA-ME {exp_name}: Averaged Results: {data}')
 
 
 if __name__ == '__main__':
@@ -352,4 +400,5 @@ if __name__ == '__main__':
     # plot_qd_results(args)
     # get_qdppo_df('/home/sumeet/QDPPO/experiments/paper_qdppo_walker2d')
     # plot_cdf_data(reevaluated_archives=True)
-    visualize_reevaluated_archives()
+    # visualize_reevaluated_archives()
+    print_corrected_qd_metrics()
