@@ -11,13 +11,14 @@ import os
 import numpy as np
 import copy
 
+from collections import OrderedDict
 from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
 
 plt.style.use('science')
 
-shared_params = {
+shared_params = OrderedDict({
     'walker2d':
         {
             'objective_range': (0, 5000),
@@ -74,7 +75,7 @@ shared_params = {
                 'grid_size': 10,
             }
         }
-}
+})
 
 PGAME_DIRS = AttrDict({
     'walker2d': f'/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/',
@@ -88,6 +89,10 @@ PPGA_DIRS = AttrDict({
     'halfcheetah': './experiments/paper_qdppo_halfcheetah',
     'humanoid': './experiments/paper_qdppo_humanoid'
 })
+
+
+def index_of(env_name):
+    return list(shared_params.keys()).index(env_name)
 
 
 def parse_args():
@@ -133,47 +138,88 @@ def compile_cdf(cfg, dataframes=None):
     return cdf
 
 
+def plot_all_results():
+    data = [
+        ('PPGA', 'data/ppga_humanoid', 'humanoid'),
+        ('PGA-ME', 'data/pgame_humanoid', 'humanoid'),
+        ('PPGA', 'data/ppga_halfcheetah', 'halfcheetah'),
+        ('PGA-ME', 'data/pgame_halfcheetah', 'halfcheetah'),
+        ('PPGA', 'data/ppga_walker2d', 'walker2d'),
+        ('PGA-ME', 'data/pgame_walker2d', 'walker2d')
+    ]
+
+    fig, axs = plt.subplots(4, 4, figsize=(12, 8))
+
+    for i, (alg, csv_dir, env_name) in enumerate(data):
+        args = {
+            'algorithm': alg,
+            'csv_dir': csv_dir,
+            'axes': axs,
+            'env_name': env_name,
+        }
+        plot_qd_results(args)
+
+    plot_cdf_data(reevaluated_archives=False, axs=axs)
+
+    axs[0][0].set_ylabel('Coverage', size='large')
+    axs[1][0].set_ylabel('QD Score', size='large')
+    axs[2][0].set_ylabel('Best Reward', size='large')
+    axs[3][0].set_ylabel('Archive CDF', size='large')
+    fig.tight_layout()
+    plt.show()
+
+
 def plot_qd_results(args):
     csv_dir = args['csv_dir']
+    algorithm = args['algorithm']
+    env_name = args['env_name']
+    x_axis_mult = 1.0
+    if 'PGA-ME' in algorithm:
+        x_axis_mult = 10.0  # b/c the log freq of pga-me was every 10 qd iters
+
+
     coverage_fp = glob.glob(csv_dir + '/' + '*coverage.csv')[0]
     coverage_data = pd.read_csv(coverage_fp).filter(regex='coverage')
 
     qdscore_fp = glob.glob(csv_dir + '/' + '*qdscore.csv')[0]
-    qdscore_data = pd.read_csv(qdscore_fp).filter(regex='QD Score')
+    qdscore_data = pd.read_csv(qdscore_fp).filter(regex='QD Score|qd_score')
 
     bestscore_fp = glob.glob(csv_dir + '/' + '*bestscore.csv')[0]
-    bestscore_data = pd.read_csv(bestscore_fp).filter(regex='best score')
+    bestscore_data = pd.read_csv(bestscore_fp).filter(regex='best score|max_fitness')
 
     avg_perf_fp = glob.glob(csv_dir + '/' + '*avgperf.csv')[0]
-    avg_perf_data = pd.read_csv(avg_perf_fp).filter(regex='average performance')
+    avg_perf_data = pd.read_csv(avg_perf_fp).filter(regex='average performance|avg_fitness')
 
-    x = np.arange(0, len(coverage_data))[:-(len(coverage_data) % 1000)]
+    # x = np.arange(0, len(coverage_data))[:-(len(coverage_data) % 1000)]
+    x = np.arange(0, len(coverage_data)) * x_axis_mult
 
-    fig, axs = plt.subplots(1, 4, figsize=(18, 3))
-    for ax in axs:
-        ax.set_xlabel('Iteration')
+    axs = args['axes']
+    # for ax in axs:
+    #     ax.set_xlabel('Iteration')
 
-    def plot_single_graph(ax, dataframe, title):
+    def plot_single_graph(ax, dataframe, label, title=None):
         minvals = dataframe.filter(regex='MIN').to_numpy().flatten()[:len(x)]
         maxvals = dataframe.filter(regex='MAX').to_numpy().flatten()[:len(x)]
         meanvals = dataframe.filter(regex='^(?!.*(MIN|MAX)).*$').to_numpy().flatten()[:len(x)]
 
-        ax.plot(x, meanvals)
+        ax.plot(x, meanvals, label=label)
         ax.fill_between(x, minvals, maxvals, alpha=0.2)
-        ax.set_title(title)
+        if title is not None:
+            ax.set_title(title)
 
-    plot_single_graph(axs[0], coverage_data, 'Coverage')
-    plot_single_graph(axs[1], qdscore_data, 'QD Score')
-    plot_single_graph(axs[2], bestscore_data, 'Best Fitness')
-    plot_single_graph(axs[3], avg_perf_data, 'Average Fitness')
-    plt.show()
+    label = args['algorithm']
+    plot_single_graph(axs[0][index_of(env_name)], coverage_data, label, title=env_name.capitalize())
+    plot_single_graph(axs[1][index_of(env_name)], qdscore_data, label)
+    plot_single_graph(axs[2][index_of(env_name)], bestscore_data, label)
+    # plot_single_graph(axs[1][1], avg_perf_data, 'Average Fitness', label)
+    axs[0][0].legend()
 
 
-def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis):
+def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis, standalone: bool = False):
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
 
-    y_label = "Threshold Percentage"
+    y_label = "Archive CDF"
 
     # Color mapping for algorithms
     palette = {
@@ -187,14 +233,15 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis):
     y_avg = data.filter(regex='Mean').to_numpy().flatten()
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
-    ax.plot(x, y_avg, linewidth=3.0, label=cfg.algorithm)
+    ax.plot(x, y_avg, linewidth=1.0, label=cfg.algorithm)
     ax.fill_between(x, y_min, y_max, alpha=0.2)
     ax.set_xlim(cfg.objective_range)
-    ax.set_yticks(np.arange(0, 101, 10.0))
+    ax.set_yticks(np.arange(0, 101, 25.0))
     ax.set_xlabel("Objective")
-    ax.set_ylabel(y_label)
-    ax.set_title(cfg.title)
-    ax.legend()
+    if standalone:
+        ax.set_ylabel(y_label)
+        ax.set_title(cfg.title)
+        ax.legend()
 
 
 def get_pgame_df(exp_dir, reevaluated_archive=False, save=False):
@@ -235,8 +282,11 @@ def get_qdppo_df(exp_dir, reevaluated_archive=False):
     return dataframes
 
 
-def plot_cdf_data(reevaluated_archives=False):
-    fig, axs = plt.subplots(2, 2, figsize=(8, 6))
+def plot_cdf_data(reevaluated_archives=False, axs=None):
+    standalone_plot = False
+    if axs is None:
+        standalone_plot = True
+        fig, axs = plt.subplots(2, 2, figsize=(8, 6))
     subtitle = 'Archive CDFs'
     prefix = 'Corrected ' if reevaluated_archives else ''
     title = prefix + subtitle
@@ -255,13 +305,15 @@ def plot_cdf_data(reevaluated_archives=False):
         pgame_dataframes = get_pgame_df(pgame_dir, reevaluated_archive=reevaluated_archives)
         pgame_cdf = compile_cdf(pgame_cfg, dataframes=pgame_dataframes)
 
-        (j, k) = np.unravel_index(i, (2, 2))
-        make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[j][k])
-        make_cdf_plot(pgame_cfg, pgame_cdf, axs[j][k])
+        if standalone_plot:
+            (j, k) = np.unravel_index(i, (2, 2))
+            make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[j][k])
+            make_cdf_plot(pgame_cfg, pgame_cdf, axs[j][k])
+        else:
+            env_idx = index_of(exp_name)
+            make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[3][env_idx])
+            make_cdf_plot(pgame_cfg, pgame_cdf, axs[3][env_idx])
 
-    fig.tight_layout()
-    fig.suptitle(title)
-    plt.show()
 
 
 def load_and_eval_pgame_archive(exp_name, seed, data_is_saved=False):
@@ -396,9 +448,10 @@ def print_corrected_qd_metrics():
 
 
 if __name__ == '__main__':
-    # args = parse_args()
+    args = parse_args()
     # plot_qd_results(args)
+    plot_all_results()
     # get_qdppo_df('/home/sumeet/QDPPO/experiments/paper_qdppo_walker2d')
     # plot_cdf_data(reevaluated_archives=True)
     # visualize_reevaluated_archives()
-    print_corrected_qd_metrics()
+    # print_corrected_qd_metrics()
