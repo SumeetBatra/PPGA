@@ -119,7 +119,7 @@ class PPO:
                         # need to denormalize the values
                         mean, var = self.vec_inference.rew_normalizers[i].return_rms.mean, \
                         self.vec_inference.rew_normalizers[i].return_rms.var
-                        val = (torch.clamp(val, -5.0, 5.0) * torch.sqrt(var)) + mean
+                        val = (torch.clamp(val, -5.0, 5.0) * torch.sqrt(var.to(self.device))) + mean.to(self.device)
 
                     next_value.append(val)
                 next_value = torch.cat(next_value).reshape(1, -1).to(self.device)
