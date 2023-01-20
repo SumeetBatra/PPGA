@@ -114,13 +114,32 @@ class PPO:
                 next_obs = next_obs.reshape(self.cfg.num_dims + 1, self.cfg.num_envs // (self.cfg.num_dims + 1), -1)
                 next_value = []
                 for i, obs, in enumerate(next_obs):
+                    val = self.qd_critic.get_value_at(obs, dim=i)
+                    if self.cfg.normalize_rewards:
+                        # need to denormalize the values
+                        mean, var = self.vec_inference.rew_normalizers[i].return_rms.mean, \
+                        self.vec_inference.rew_normalizers[i].return_rms.var
+                        val = (torch.clamp(val, -5.0, 5.0) * torch.sqrt(var)) + mean
+
                     next_value.append(self.qd_critic.get_value_at(obs, dim=i))
                 next_value = torch.cat(next_value).reshape(1, -1).to(self.device)
             elif move_mean_agent:
                 next_value = self.mean_critic.get_value(next_obs).reshape(1, -1).to(self.device)
+                if self.cfg.normalize_rewards:
+                    #  need to de-normalize values
+                    mean, var = self.vec_inference.rew_normalizers[0].return_rms.mean, \
+                    self.vec_inference.rew_normalizers[0].return_rms.var
+                    next_value = (torch.clamp(next_value, -5.0, 5.0) * torch.sqrt(var)) + mean
+                    values = (torch.clamp(values, -5.0, 5.0) * torch.sqrt(var)) + mean
             else:
                 # standard ppo
                 next_value = self.qd_critic.get_value(next_obs).reshape(1, -1).to(self.device)
+                if self.cfg.normalize_rewards:
+                    #  need to de-normalize values
+                    mean, var = self.vec_inference.rew_normalizers[0].return_rms.mean, \
+                    self.vec_inference.rew_normalizers[0].return_rms.var
+                    next_value = (torch.clamp(next_value, -5.0, 5.0) * torch.sqrt(var)) + mean
+                    values = (torch.clamp(values, -5.0, 5.0) * torch.sqrt(var)) + mean
             # assume we use gae
             advantages = torch.zeros_like(rewards).to(self.device)
             lastgaelam = 0

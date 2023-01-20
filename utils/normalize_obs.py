@@ -75,20 +75,11 @@ class NormalizeReward(nn.Module):
         instantiated or the policy was changed recently.
     """
 
-    def __init__(self, num_envs, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8):
+    def __init__(self, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8):
         super(NormalizeReward, self).__init__()
-        self.num_envs = num_envs
         self.return_rms = RunningMeanStd(shape=(reward_dim,))
-        # self.returns = torch.zeros((self.num_envs, reward_dim))
         self.gamma = gamma
         self.epsilon = epsilon
-
-    # def forward(self, rews, dones):
-    #     with torch.no_grad():
-    #         self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
-    #         rews = self.normalize(rews)
-    #         self.returns[dones.long()] = 0.0
-    #     return rews
 
     def forward(self, returns):
         with torch.no_grad():
@@ -99,7 +90,7 @@ class NormalizeReward(nn.Module):
         """Normalizes the rewards with the running mean rewards and their variance."""
         returns = returns.to(self.return_rms.var.device)
         self.return_rms.update(returns)
-        return (returns - self.return_rms.mean) / torch.sqrt(self.return_rms.var + self.epsilon)
+        return torch.clamp((returns - self.return_rms.mean) / torch.sqrt(self.return_rms.var + self.epsilon), -5.0, 5.0)
     
 
 class VecRewardNormalizer(nn.Module):
