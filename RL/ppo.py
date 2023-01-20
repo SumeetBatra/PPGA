@@ -121,7 +121,7 @@ class PPO:
                         self.vec_inference.rew_normalizers[i].return_rms.var
                         val = (torch.clamp(val, -5.0, 5.0) * torch.sqrt(var)) + mean
 
-                    next_value.append(self.qd_critic.get_value_at(obs, dim=i))
+                    next_value.append(val)
                 next_value = torch.cat(next_value).reshape(1, -1).to(self.device)
             elif move_mean_agent:
                 next_value = self.mean_critic.get_value(next_obs).reshape(1, -1).to(self.device)

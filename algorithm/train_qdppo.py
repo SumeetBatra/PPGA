@@ -305,6 +305,10 @@ def run_experiment(cfg: AttrDict,
             if scheduler.emitters[0].mean_agent_obs_normalizer is not None:
                 mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
 
+        if cfg.normalize_rewards:
+            if scheduler.emitters[0].mean_agent_reward_normalizer is not None:
+                mean_agents[0].reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
+
         # # need to reset the std-dev parameter. Otherwise the agents stop learning and branched solutions
         # # all fall in the same cell
         for agent in mean_agents:
@@ -327,7 +331,8 @@ def run_experiment(cfg: AttrDict,
         branched_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in branched_sols]
         ppo.agents = branched_agents
         eval_obs_normalizer = mean_agents[0].obs_normalizer if cfg.normalize_obs else None
-        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env, verbose=True, obs_normalizer=eval_obs_normalizer)
+        eval_rew_normalizer = mean_agents[0].reward_normalizer if cfg.normalize_rewards else None
+        objs, measures, metadata = ppo.evaluate(ppo.vec_inference, ppo.vec_env, verbose=True, obs_normalizer=eval_obs_normalizer, reward_normalizer=eval_rew_normalizer)
 
         if cfg.weight_decay:
             reg_loss = cfg.weight_decay * np.array([np.linalg.norm(sol) for sol in branched_sols]).reshape(objs.shape)
@@ -342,6 +347,8 @@ def run_experiment(cfg: AttrDict,
             # load the obs normalizer used for the mean agent
             if cfg.normalize_obs:
                 mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
+            if cfg.normalize_rewards:
+                mean_agents[0].reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
             # reset the std-devs
             for agent in mean_agents:
                 agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
@@ -362,7 +369,6 @@ def run_experiment(cfg: AttrDict,
         if all(mean_grad_coeffs[0]) == 0:  # this is usually only the case on startup or on cma-es restart
             mean_grad_coeffs[0][0] = 1
         ppo.grad_coeffs = mean_grad_coeffs
-        mean_agents[0].reward_normalizer = NormalizeReward(cfg.num_envs)
         ppo.agents = mean_agents
         log.info('Moving the mean solution point...')
         ppo.train(num_updates=cfg.move_mean_iters,
@@ -376,6 +382,8 @@ def run_experiment(cfg: AttrDict,
         scheduler.emitters[0].update_theta(new_mean_sol)
         if cfg.normalize_obs:
             scheduler.emitters[0].mean_agent_obs_normalizer = trained_mean_agent.obs_normalizer
+        if cfg.normalize_rewards:
+            scheduler.emitters[0].mean_agent_reward_normalizer = trained_mean_agent.reward_normalizer
 
         # logging
         log.debug(f'{itr=}, {itrs=}, Progress: {(100.0 * (itr / itrs)):.2f}%')
