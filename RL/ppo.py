@@ -320,7 +320,7 @@ class PPO:
                                                              move_mean_agent=move_mean_agent)
             # normalize the returns
             for i, single_step_returns in enumerate(returns):
-                returns[i][:] = self.vec_inference.vec_normalize_rewards(single_step_returns, self.next_done)
+                returns[i][:] = self.vec_inference.vec_normalize_rewards(single_step_returns)
 
             # flatten the batch
             b_obs = self.obs.transpose(0, 1).reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)

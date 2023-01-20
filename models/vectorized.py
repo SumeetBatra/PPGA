@@ -114,13 +114,12 @@ class VectorizedPolicy(StochasticPolicy, ABC):
             obs[i] = normalizer(model_obs)
         return obs.reshape(-1, obs.shape[-1])
 
-    def vec_normalize_rewards(self, rewards, next_done):
+    def vec_normalize_rewards(self, rewards):
         # TODO: make this properly vectorized
         num_envs = rewards.shape[0]
         envs_per_model = num_envs // self.num_models
         rewards = rewards.reshape(self.num_models, envs_per_model)
-        next_dones = next_done.reshape(self.num_models, envs_per_model)
-        for i, (model_rews, dones, normalizer) in enumerate(zip(rewards, next_dones, self.rew_normalizers)):
+        for i, (model_rews, normalizer) in enumerate(zip(rewards, self.rew_normalizers)):
             rewards[i] = normalizer(model_rews)
         return rewards.reshape(-1)
 
