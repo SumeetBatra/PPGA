@@ -142,10 +142,13 @@ def plot_all_results():
     data = [
         ('PPGA', 'data/ppga_humanoid', 'humanoid'),
         ('PGA-ME', 'data/pgame_humanoid', 'humanoid'),
+        ('SEP-CMA-MAE', 'data/sep_cma_mae_humanoid', 'humanoid'),
         ('PPGA', 'data/ppga_halfcheetah', 'halfcheetah'),
         ('PGA-ME', 'data/pgame_halfcheetah', 'halfcheetah'),
+        ('SEP-CMA-MAE', 'data/sep_cma_mae_halfcheetah', 'halfcheetah'),
         ('PPGA', 'data/ppga_walker2d', 'walker2d'),
-        ('PGA-ME', 'data/pgame_walker2d', 'walker2d')
+        ('PGA-ME', 'data/pgame_walker2d', 'walker2d'),
+        ('SEP-CMA-MAE', 'data/sep_cma_mae_walker2d', 'walker2d'),
     ]
 
     fig, axs = plt.subplots(4, 4, figsize=(12, 8))
