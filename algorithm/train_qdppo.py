@@ -394,7 +394,7 @@ def run_experiment(cfg: AttrDict,
             # Save a full archive for analysis.
             df = result_archive.as_pandas(include_solutions=True)
             df.to_pickle(os.path.join(final_cp_dir, f"archive_{itr:08d}.pkl"))
-            scheduler.emitters[0].opt.problem._generator = None# cannot pickle generator objects so need to remove it
+            scheduler.emitters[0].opt.problem._generator = None  # cannot pickle generator objects so need to remove it
             # save the scheduler for checkpointing
             with open(os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl'), 'wb') as f:
                 pickle.dump(scheduler, f)

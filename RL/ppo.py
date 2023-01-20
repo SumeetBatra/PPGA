@@ -415,13 +415,13 @@ class PPO:
         measures = torch.zeros((vec_env.num_envs, self.cfg.num_dims)).to(self.device)
 
         if self.cfg.normalize_obs and obs_normalizer is not None:
-            obs_mean = obs_normalizer.obs_rms.mean.to(self.device)
-            obs_var = obs_normalizer.obs_rms.var.to(self.device)
+            normalizers = [copy.deepcopy(obs_normalizer) for _ in range(vec_agent.num_models)]
+            vec_agent.obs_normalizers = normalizers
 
         while not torch.all(dones):
             with torch.no_grad():
                 if self.cfg.normalize_obs:
-                    obs = (obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
+                    obs = vec_agent.vec_normalize_obs(obs)
                 acts, _, _ = vec_agent.get_action(obs)
                 acts = acts.to(torch.float32)
                 obs, rew, next_dones, infos = vec_env.step(acts)
@@ -451,8 +451,9 @@ class PPO:
         objective_measures = np.concatenate((total_reward.reshape(-1, 1), measures), axis=1)
 
         if self.cfg.normalize_obs:
+            trained_normalizers = vec_agent.obs_normalizers
             for i, data in enumerate(metadata):
-                data['obs_normalizer'] = obs_normalizer
+                data['obs_normalizer'] = trained_normalizers[i]
 
         if verbose:
             np.set_printoptions(suppress=True)
