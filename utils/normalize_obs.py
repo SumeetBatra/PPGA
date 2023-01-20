@@ -11,7 +11,7 @@ class RunningMeanStd(nn.Module):
     def __init__(self, epsilon=1e-4, shape=()):
         super().__init__()
         # TODO: these should be float64. Fix this
-        self.register_buffer('mean', torch.zeros(shape, dtype=torch.float32))
+        self.register_buffer('mean', torch.ones(shape, dtype=torch.float32))
         self.register_buffer('var', torch.ones(shape, dtype=torch.float32))
         self.register_buffer('count', torch.ones([1], dtype=torch.float32))
 
@@ -79,22 +79,27 @@ class NormalizeReward(nn.Module):
         super(NormalizeReward, self).__init__()
         self.num_envs = num_envs
         self.return_rms = RunningMeanStd(shape=(reward_dim,))
-        self.returns = torch.zeros((self.num_envs, reward_dim))
+        # self.returns = torch.zeros((self.num_envs, reward_dim))
         self.gamma = gamma
         self.epsilon = epsilon
 
-    def forward(self, rews, dones):
-        with torch.no_grad():
-            self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
-            rews = self.normalize(rews)
-            self.returns[dones.long()] = 0.0
-        return rews
+    # def forward(self, rews, dones):
+    #     with torch.no_grad():
+    #         self.returns = self.returns * self.gamma + rews.reshape(self.returns.shape)
+    #         rews = self.normalize(rews)
+    #         self.returns[dones.long()] = 0.0
+    #     return rews
 
-    def normalize(self, rews):
+    def forward(self, returns):
+        with torch.no_grad():
+            returns = self.normalize(returns)
+        return returns
+
+    def normalize(self, returns):
         """Normalizes the rewards with the running mean rewards and their variance."""
-        rews = rews.to(self.return_rms.var.device)
-        self.return_rms.update(self.returns)
-        return rews / torch.sqrt(self.return_rms.var + self.epsilon)
+        returns = returns.to(self.return_rms.var.device)
+        self.return_rms.update(returns)
+        return (returns - self.return_rms.mean) / torch.sqrt(self.return_rms.var + self.epsilon)
     
 
 class VecRewardNormalizer(nn.Module):

@@ -238,6 +238,8 @@ class PPO:
             original_obs_normalizer = None
             if self.cfg.normalize_obs:
                 original_obs_normalizer = self._agents[0].obs_normalizer
+            if self.cfg.normalize_rewards:
+                original_reward_normalizer = self._agents[0].reward_normalizer
             # create copy of agent for f and one of each m
             agent_original_params = [copy.deepcopy(solution_params) for _ in range(self.cfg.num_dims + 1)]
             agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(params) for params in
@@ -285,8 +287,8 @@ class PPO:
                 reward = reward.cpu()
                 self.total_rewards += reward
                 self.next_obs = self.next_obs.to(self.device)
-                if self.cfg.normalize_rewards:
-                    reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
+                # if self.cfg.normalize_rewards:
+                #     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
                 self.rewards[step] = reward.squeeze()
 
                 if not calculate_dqd_gradients and not move_mean_agent:
@@ -316,6 +318,10 @@ class PPO:
                 advantages, returns = self.calculate_rewards(self.next_obs, self.next_done, self.rewards, self.values,
                                                              self.dones, rollout_length=rollout_length,
                                                              move_mean_agent=move_mean_agent)
+            # normalize the returns
+            for i, single_step_returns in enumerate(returns):
+                returns[i][:] = self.vec_inference.vec_normalize_rewards(single_step_returns, self.next_done)
+
             # flatten the batch
             b_obs = self.obs.transpose(0, 1).reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
             b_logprobs = self.logprobs.transpose(0, 1).reshape(num_agents, -1)
@@ -390,13 +396,16 @@ class PPO:
             self.vec_inference = VectorizedActor(self.cfg, original_agent, Actor,
                                                  obs_shape=self.obs_shape,
                                                  action_shape=self.action_shape)
-            f, m, metadata = self.evaluate(self.vec_inference, self.vec_env, obs_normalizer=original_obs_normalizer)
+            f, m, metadata = self.evaluate(self.vec_inference,
+                                           self.vec_env,
+                                           obs_normalizer=original_obs_normalizer,
+                                           reward_normalizer=original_reward_normalizer)
             return f.reshape(self.vec_inference.num_models, ), \
                 m.reshape(self.vec_inference.num_models, -1), \
                 jacobian, \
                 metadata
 
-    def evaluate(self, vec_agent, vec_env, verbose=True, obs_normalizer=None):
+    def evaluate(self, vec_agent, vec_env, verbose=True, obs_normalizer=None, reward_normalizer=None):
         '''
         Evaluate all agents for one episode
         :param vec_agent: Vectorized agents for vectorized inference
@@ -454,6 +463,10 @@ class PPO:
             trained_normalizers = vec_agent.obs_normalizers
             for i, data in enumerate(metadata):
                 data['obs_normalizer'] = trained_normalizers[i]
+
+        if self.cfg.normalize_rewards:
+            for i, data in enumerate(metadata):
+                data['reward_normalizer'] = reward_normalizer
 
         if verbose:
             np.set_printoptions(suppress=True)
