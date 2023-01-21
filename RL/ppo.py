@@ -486,9 +486,8 @@ class PPO:
         objective_measures = np.concatenate((total_reward.reshape(-1, 1), measures), axis=1)
 
         if self.cfg.normalize_obs:
-            trained_normalizers = vec_agent.obs_normalizers
             for i, data in enumerate(metadata):
-                data['obs_normalizer'] = trained_normalizers[i]
+                data['obs_normalizer'] = obs_normalizer
 
         if self.cfg.normalize_rewards:
             for i, data in enumerate(metadata):
