@@ -346,9 +346,6 @@ def run_experiment(cfg: AttrDict,
                 mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
             if cfg.normalize_rewards:
                 mean_agents[0].reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
-            # reset the std-devs
-            for agent in mean_agents:
-                agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
             # load the critics corresponding to this agent
             mean_critic_params = scheduler.emitters[0].mean_critic_params

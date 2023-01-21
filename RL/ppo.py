@@ -107,9 +107,9 @@ class PPO:
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
     def update_critics_params(self, mean_critic_params, qd_critic_params):
-        self.mean_critic.deserialize(mean_critic_params)
+        self.mean_critic.deserialize(mean_critic_params).to(self.device)
         self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
-        self.qd_critic.deserialize(qd_critic_params)
+        self.qd_critic.deserialize(qd_critic_params).to(self.device)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, calculate_dqd_gradients=False,
