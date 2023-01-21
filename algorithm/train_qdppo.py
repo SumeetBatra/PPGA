@@ -309,11 +309,6 @@ def run_experiment(cfg: AttrDict,
             if scheduler.emitters[0].mean_agent_reward_normalizer is not None:
                 mean_agents[0].reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
 
-        # # need to reset the std-dev parameter. Otherwise the agents stop learning and branched solutions
-        # # all fall in the same cell
-        for agent in mean_agents:
-            agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
-
         ppo.agents = mean_agents
         objs, measures, jacobian, metadata = ppo.train(num_updates=cfg.calc_gradient_iters,
                                                        rollout_length=cfg.rollout_length,
@@ -329,6 +324,8 @@ def run_experiment(cfg: AttrDict,
         # sample a batch of branched solution points and evaluate their f and m
         branched_sols = scheduler.ask()
         branched_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in branched_sols]
+        for agent in branched_agents:
+            agent.actor_logstd.data = mean_agents[0].actor_logstd.data
         ppo.agents = branched_agents
         eval_obs_normalizer = mean_agents[0].obs_normalizer if cfg.normalize_obs else None
         eval_rew_normalizer = mean_agents[0].reward_normalizer if cfg.normalize_rewards else None
@@ -357,8 +354,6 @@ def run_experiment(cfg: AttrDict,
             mean_critic_params = scheduler.emitters[0].mean_critic_params
             qd_critic_params = scheduler.emitters[0].qd_critic_params
             ppo.update_critics_params(mean_critic_params, qd_critic_params)
-
-
 
         mean_grad_coeffs = scheduler.emitters[0].opt.mu  # keep track of where the emitter is taking us
         mean_grad_coeffs = np.expand_dims(mean_grad_coeffs, axis=0).astype(np.float32)
