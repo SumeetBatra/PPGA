@@ -10,7 +10,7 @@ GRID_SIZE=10  # number of cells per archive dimension
 SEED=1111
 
 
-RUN_NAME="paper_qdppo_"$ENV_NAME"_seed_"$SEED
+RUN_NAME="paper_qdppo_"$ENV_NAME"_seed_"$SEED"_v2"
 echo $RUN_NAME
 python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --rollout_length=128 \
@@ -20,11 +20,11 @@ python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --num_dims=4 \
                                 --num_minibatches=8 \
                                 --update_epochs=4 \
-                                --normalize_obs=False \
+                                --normalize_obs=True \
                                 --normalize_rewards=True \
                                 --wandb_run_name=$RUN_NAME \
-                                --popsize=400 \
-                                --env_batch_size=4000 \
+                                --popsize=300 \
+                                --env_batch_size=3000 \
                                 --learning_rate=0.001 \
                                 --vf_coef=2 \
                                 --max_grad_norm=1 \
@@ -33,9 +33,9 @@ python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --dqd_algorithm=cma_maega \
                                 --calc_gradient_iters=10 \
                                 --move_mean_iters=10 \
-                                --archive_lr=1.0 \
+                                --archive_lr=0.1 \
                                 --restart_rule=no_improvement \
                                 --sigma0=3.0 \
-                                --threshold_min=-10000 \
+                                --threshold_min=-1000 \
                                 --grid_size=$GRID_SIZE \
-                                --logdir=./experiments/paper_qdppo_$ENV_NAME
+                                --logdir=./experiments/paper_qdppo_$ENV_NAME_v2
