@@ -106,6 +106,12 @@ class PPO:
             self.device)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
+    def update_critics_params(self, mean_critic_params, qd_critic_params):
+        self.mean_critic.deserialize(mean_critic_params)
+        self.mean_critic_optim = torch.optim.Adam(self.mean_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+        self.qd_critic.deserialize(qd_critic_params)
+        self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
+
     def calculate_rewards(self, next_obs, next_done, rewards, values, dones, rollout_length, calculate_dqd_gradients=False,
                           move_mean_agent=False):
         # bootstrap value if not done
@@ -471,7 +477,9 @@ class PPO:
             axis=1)
         avg_traj_lengths = traj_lengths.to(torch.float32).reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).\
             mean(dim=1).cpu().numpy()
-        metadata = np.array([{'traj_length': t} for t in avg_traj_lengths]).reshape(-1,)
+        metadata = np.array([{'traj_length': t,
+                              'mean_critic': self.mean_critic.serialize(),
+                              'qd_critic': self.qd_critic.serialize()} for t in avg_traj_lengths]).reshape(-1,)
         max_reward = np.max(total_reward)
         min_reward = np.min(total_reward)
         mean_reward = np.mean(total_reward)

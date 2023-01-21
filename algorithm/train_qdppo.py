@@ -353,6 +353,11 @@ def run_experiment(cfg: AttrDict,
             for agent in mean_agents:
                 agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
+            # load the critics corresponding to this agent
+            mean_critic_params = scheduler.emitters[0].mean_critic_params
+            qd_critic_params = scheduler.emitters[0].qd_critic_params
+            ppo.update_critics_params(mean_critic_params, qd_critic_params)
+
 
 
         mean_grad_coeffs = scheduler.emitters[0].opt.mu  # keep track of where the emitter is taking us
