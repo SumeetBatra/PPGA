@@ -449,13 +449,12 @@ class PPO:
         measures = torch.zeros((vec_env.num_envs, self.cfg.num_dims)).to(self.device)
 
         if self.cfg.normalize_obs and obs_normalizer is not None:
-            normalizers = [copy.deepcopy(obs_normalizer) for _ in range(vec_agent.num_models)]
-            vec_agent.obs_normalizers = normalizers
+            mean, var = obs_normalizer.obs_rms.mean, obs_normalizer.obs_rms.var
 
         while not torch.all(dones):
             with torch.no_grad():
                 if self.cfg.normalize_obs:
-                    obs = vec_agent.vec_normalize_obs(obs)
+                    obs = (obs - mean) / (torch.sqrt(var) + 1e-8)
                 acts, _, _ = vec_agent.get_action(obs)
                 acts = acts.to(torch.float32)
                 obs, rew, next_dones, infos = vec_env.step(acts)
