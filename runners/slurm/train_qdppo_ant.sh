@@ -40,6 +40,6 @@ srun python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                      --archive_lr=0.1 \
                                      --restart_rule=no_improvement \
                                      --sigma0=3.0 \
-                                     --threshold_min=-1000 \
+                                     --threshold_min=-500 \
                                      --grid_size=$GRID_SIZE \
                                      --logdir=./experiments/paper_qdppo_$ENV_NAME_v2
