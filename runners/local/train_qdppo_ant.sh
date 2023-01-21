@@ -38,4 +38,4 @@ python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --sigma0=3.0 \
                                 --threshold_min=-500 \
                                 --grid_size=$GRID_SIZE \
-                                --logdir=./experiments/paper_qdppo_$ENV_NAME_v2
+                                --logdir=./experiments/paper_ppga_"$ENV_NAME"_v2
