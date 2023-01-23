@@ -91,6 +91,7 @@ def parse_args():
     parser.add_argument('--archive_lr', type=float, help='Archive learning rate for MAEGA')
     parser.add_argument('--threshold_min', type=float, default=0.0, help='Min objective threshold for adding new solutions to the archive')
     parser.add_argument('--take_archive_snapshots', type=lambda x: bool(strtobool(x)), default=False, help='Log the objective scores in every cell in the archive every log_freq iterations. Useful for pretty visualizations')
+    parser.add_argument('--adaptive_stddev', type=lambda x: bool(strtobool(x)), default=True, help='If False, the log stddev parameter in the actor will be reset on each QD iteration. Can potentially help exploration but may lose performance')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -300,6 +301,9 @@ def run_experiment(cfg: AttrDict,
         solution_batch = scheduler.ask_dqd()
         mean_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol
                        in solution_batch]
+        if not cfg.adaptive_stddev:
+            for agent in mean_agents:
+                agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
         if cfg.normalize_obs:
             if scheduler.emitters[0].mean_agent_obs_normalizer is not None:
@@ -346,11 +350,9 @@ def run_experiment(cfg: AttrDict,
                 mean_agents[0].obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
             if cfg.normalize_rewards:
                 mean_agents[0].reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
-
-            # load the critics corresponding to this agent
-            mean_critic_params = scheduler.emitters[0].mean_critic_params
-            qd_critic_params = scheduler.emitters[0].qd_critic_params
-            ppo.update_critics_params(mean_critic_params, qd_critic_params)
+            if not cfg.adaptive_stddev:
+                for agent in mean_agents:
+                    agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
         mean_grad_coeffs = scheduler.emitters[0].opt.mu  # keep track of where the emitter is taking us
         mean_grad_coeffs = np.expand_dims(mean_grad_coeffs, axis=0).astype(np.float32)
