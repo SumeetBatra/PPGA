@@ -232,11 +232,11 @@ class PPO:
                 loss = pg_loss - self.cfg.entropy_coef * entropy_loss + v_loss * self.cfg.vf_coef
 
                 for p in self.vec_inference.parameters():
-		    p.grad = None
-		for p in self.qd_critic.parameters():
-		    p.grad = None
-		for p in self.mean_critic.parameters():
-		    p.grad = None
+                    p.grad = None
+                for p in self.qd_critic.parameters():
+                    p.grad = None
+                for p in self.mean_critic.parameters():
+                    p.grad = None
                 loss.backward()
                 nn.utils.clip_grad_norm_(self.vec_inference.parameters(), self.cfg.max_grad_norm)
                 self.vec_optimizer.step()
