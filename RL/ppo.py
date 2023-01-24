@@ -320,13 +320,19 @@ class PPO:
 
                 if not calculate_dqd_gradients and not move_mean_agent:
                     # TODO: move this to a separate process
-                    if self.num_intervals % self._report_interval == 0:
-                        for i, done in enumerate(self.next_done.flatten()):
-                            if done:
-                                total_reward = self.total_rewards[i].clone()
-                                # log.debug(f'{total_reward=}')
-                                self.episodic_returns.append(total_reward)
-                                self.total_rewards[i] = 0
+                    # if self.num_intervals % self._report_interval == 0:
+                    #     for i, done in enumerate(self.next_done.flatten()):
+                    #         if done:
+                    #             total_reward = self.total_rewards[i].clone()
+                    #             # log.debug(f'{total_reward=}')
+                    #             self.episodic_returns.append(total_reward)
+                    #             self.total_rewards[i] = 0
+                    if self.next_done.any():
+                        dones_cpu = self.next_done.long().cpu()
+                        done_inds = torch.where(dones_cpu ==1)[0]
+                        total_rewards = self.total_rewards.clone()
+                        self.episodic_returns.extend(total_rewards[done_inds].tolist())
+                        self.total_rewards[done_inds] = 0
                     self.num_intervals += 1
 
             if calculate_dqd_gradients:
