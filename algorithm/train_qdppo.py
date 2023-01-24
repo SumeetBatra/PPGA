@@ -406,8 +406,8 @@ def run_experiment(cfg: AttrDict,
             with open(os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl'), 'wb') as f:
                 pickle.dump(scheduler, f)
 
-            # save the top 1 checkpoints, delete older ones
-            while len(get_checkpoints(str(cp_dir))) > 1:
+            # save the top 2 checkpoints, delete older ones
+            while len(get_checkpoints(str(cp_dir))) > 2:
                 oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
                 if os.path.exists(oldest_checkpoint):
                     log.info(f'Removing checkpoint {oldest_checkpoint}')
