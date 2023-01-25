@@ -258,6 +258,8 @@ class PPO:
               negative_measure_gradients=False):
         global_step = 0
         self.next_obs = self.vec_env.reset()
+        if self.cfg.normalize_obs:
+            self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
 
         if calculate_dqd_gradients:
             # TODO: make this work for multiple emitters
@@ -279,8 +281,7 @@ class PPO:
         for update in range(1, num_updates + 1):
             for step in range(rollout_length):
                 global_step += self.vec_env.num_envs
-                if self.cfg.normalize_obs:
-                    self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
+
                 self.obs[step] = self.next_obs
                 self.dones[step] = self.next_done.view(-1)
 
@@ -304,6 +305,8 @@ class PPO:
                 self.logprobs[step] = logprob
 
                 self.next_obs, reward, self.next_done, infos = self.vec_env.step(action)
+                if self.cfg.normalize_obs:
+                    self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
                 measures = -infos['measures'] if negative_measure_gradients else infos['measures']
                 self.measures[step] = measures
                 if move_mean_agent:

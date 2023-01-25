@@ -17,6 +17,7 @@ def parse_args():
                         help='Use weights and biases to track the exp')
     parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
     parser.add_argument('--wandb_group', type=str)
+    parser.add_argument('--wandb_project', type=str, default='QDPPO')
     parser.add_argument('--report_interval', type=int, default=5, help='Log objective results every N updates')
 
     # algorithm args
@@ -86,7 +87,7 @@ if __name__ == '__main__':
     log.debug(f'Environment: {cfg.env_name}, obs_shape: {cfg.obs_shape}, action_shape: {cfg.action_shape}')
 
     if cfg.use_wandb:
-        config_wandb(cfg=cfg, batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group)
+        config_wandb(cfg=cfg, batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group, wandb_project=cfg.wandb_project)
 
     alg = PPO(cfg.seed, cfg, vec_env)
     num_updates = cfg.total_timesteps // cfg.batch_size

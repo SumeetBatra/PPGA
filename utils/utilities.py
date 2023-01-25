@@ -52,7 +52,7 @@ def set_file_handler(logdir):
 
 def config_wandb(**kwargs):
     # wandb initialization
-    wandb.init(project='QDPPO', entity='qdrl', group=kwargs['wandb_group'], name=kwargs['run_name'])
+    wandb.init(project=kwargs['wandb_project'], entity='qdrl', group=kwargs['wandb_group'], name=kwargs['run_name'])
     cfg = kwargs.get('cfg', None)
     if cfg is None:
         cfg = {}
