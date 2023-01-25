@@ -395,6 +395,7 @@ class PPO:
                     "losses/clipfrac": np.mean(clipfracs),
                     "losses/explained_variance": explained_var,
                     "Env step": global_step,
+                    "global_step": global_step,
                     "Update": update
                 })
 
@@ -403,6 +404,7 @@ class PPO:
                     wandb.log({
                         f"Average Episodic Reward": sum(self.episodic_returns) / len(self.episodic_returns),
                         "Env step": global_step,
+                        "global_step": global_step,
                         "Update": update
                     })
 
