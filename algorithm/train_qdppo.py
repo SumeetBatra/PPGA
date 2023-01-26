@@ -60,6 +60,8 @@ def parse_args():
                         help="the surrogate clipping coefficient")
     parser.add_argument("--clip_vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
+    parser.add_argument("--clip_value_coef", type=float, default=0.2,
+                        help="value clipping coefficient")
     parser.add_argument("--entropy_coef", type=float, default=0.0,
                         help="coefficient of the entropy")
     parser.add_argument("--vf_coef", type=float, default=0.5,
@@ -70,6 +72,7 @@ def parse_args():
                         help="the target KL divergence threshold")
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
+    parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False, help='Use bootstrap value estimates')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
 
     # QD Params
@@ -515,7 +518,7 @@ if __name__ == '__main__':
     ppo = PPO(seed=cfg.seed, cfg=cfg, vec_env=vec_env)
     if cfg.use_wandb:
         config_wandb(batch_size=cfg.batch_size, total_iters=cfg.total_iterations, run_name=cfg.wandb_run_name,
-                     wandb_group=cfg.wandb_group, wandb_project=cfg.wandb_project, cfg=cfg)
+                     wandb_project=cfg.wandb_project, wandb_group=cfg.wandb_group, cfg=cfg)
     outdir = os.path.join(cfg.logdir, str(cfg.seed))
     assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None,\
         f"Warning: experiment dir {outdir} exists. Danger of overwriting previous run"

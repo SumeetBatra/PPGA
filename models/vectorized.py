@@ -160,5 +160,3 @@ class VectorizedActor(VectorizedPolicy):
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy()
-
-

@@ -1,5 +1,7 @@
 import argparse
+import os
 import sys
+import time
 from distutils.util import strtobool
 from attrdict import AttrDict
 from utils.utilities import config_wandb, log
@@ -46,6 +48,8 @@ def parse_args():
                         help="Toggles advantages normalization")
     parser.add_argument("--clip_coef", type=float, default=0.2,
                         help="the surrogate clipping coefficient")
+    parser.add_argument("--clip_value_coef", type=float, default=0.2,
+                        help="value clipping coefficient")
     parser.add_argument("--clip_vloss", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                         help="Toggles whether or not to use a clipped loss for the value function, as per the paper.")
     parser.add_argument("--entropy_coef", type=float, default=0.0,
@@ -58,6 +62,8 @@ def parse_args():
                         help="the target KL divergence threshold")
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
     parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
+    parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False, help='Use bootstrap value estimates')
+
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
     # vestigial QD params
     parser.add_argument('--num_dims', type=int)
@@ -69,6 +75,9 @@ def parse_args():
 
 if __name__ == '__main__':
     cfg = parse_args()
+
+    if cfg.seed is None:
+        cfg.seed = int(time.time()) + int(os.getpid())
 
     if cfg.env_type == 'brax':
         from envs.brax_custom.brax_env import make_vec_env_brax
