@@ -403,8 +403,9 @@ class PPO:
 
                 train_elapse = time.time() - train_start
                 fps = global_step / train_elapse
-                if update % 10 == 0:
-                    log.debug(f'Avg FPS so far: {fps:.2f}, env steps: {global_step}, train time: {train_elapse:.2f}, avg reward: {np.mean(self.episodic_returns)}')
+                if not calculate_dqd_gradients and not move_mean_agent:  # backwards compatibility for standard PPO
+                    if update % 10 == 0:
+                        log.debug(f'Avg FPS so far: {fps:.2f}, env steps: {global_step}, train time: {train_elapse:.2f}, avg reward: {np.mean(self.episodic_returns)}')
 
                 if self.cfg.use_wandb:
                     wandb.log({
