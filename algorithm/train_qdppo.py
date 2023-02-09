@@ -369,7 +369,7 @@ def run_experiment(cfg: AttrDict,
 
         # now we step towards the new mean coefficient point with ppo and hack dqd to throw away the recombination
         # solution point
-        if all(mean_grad_coeffs[0]) == 0:  # this is usually only the case on startup or on cma-es restart
+        if all(mean_grad_coeffs[0]) == 0:  # this is usually only the case on startup or on xnes restart
             mean_grad_coeffs[0][0] = 1
         ppo.grad_coeffs = mean_grad_coeffs
         ppo.agents = mean_agents
