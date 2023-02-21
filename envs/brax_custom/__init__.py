@@ -41,7 +41,7 @@ from brax.envs.env import Env, State, Wrapper
 import gym
 
 from envs.brax_custom.custom_wrappers.locomotion_wrappers import FeetContactWrapper
-from envs.brax_custom.custom_wrappers.reward import TotalReward
+from envs.brax_custom.custom_wrappers.reward_wrappers import TotalReward
 from envs.brax_custom.custom_wrappers.clip_wrappers import ActionClipWrapper, RewardClipWrapper, ObservationClipWrapper
 
 # From QDax: experimentally determinated offset (except for antmaze)
