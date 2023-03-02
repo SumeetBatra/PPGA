@@ -58,6 +58,7 @@ class PPO:
         self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.cfg = cfg
+        self._theta = None  # nn params. Used for compatibility with DQD side
 
         # critic for moving the mean solution point
         self.mean_critic = Critic(self.obs_shape).to(self.device)
@@ -127,6 +128,14 @@ class PPO:
         repeats = self.cfg.num_envs // coeffs.shape[0]
         coeffs = torch.repeat_interleave(coeffs, dim=0, repeats=repeats)
         self._grad_coeffs = coeffs
+
+    @property
+    def theta(self):
+        return self._theta
+
+    @theta.setter
+    def theta(self, new_theta):
+        self._theta = new_theta
 
     def update_critics(self, critics_list: List[Critic]):
         self.qd_critic = QDCritic(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(
