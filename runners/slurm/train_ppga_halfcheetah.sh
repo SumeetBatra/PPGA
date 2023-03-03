@@ -3,11 +3,7 @@
 #SBATCH -N1
 #SBATCH -n1
 #SBATCH -c4
-#SBATCH --output=tmp/method3_walker2d_%j.log
-# the following params need to be set manually
-# PROJECT_PATH: path to QDax root on your system
-# ENV_NAME: which environment to run on (see qdax/environments/__init__.py for a list of all runnable envs)
-# then from the project root dir you can run ./scripts/train_pga_me.sh
+#SBATCH --output=tmp/ppga_halfcheetah_%j.log
 
 ENV_NAME="halfcheetah"
 GRID_SIZE=50  # number of cells per archive dimension
@@ -26,7 +22,7 @@ srun python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --num_minibatches=8 \
                                 --update_epochs=4 \
                                 --normalize_obs=True \
-                                --normalize_rewards=True \
+                                --normalize_returns=True \
                                 --wandb_run_name=$RUN_NAME\
                                 --popsize=300 \
                                 --env_batch_size=3000 \
@@ -44,4 +40,4 @@ srun python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --archive_lr=0.5 \
                                 --threshold_min=200 \
                                 --grid_size=$GRID_SIZE \
-                                --logdir=./experiments/paper_ppga_"$ENV_NAME"_adaptive_stddev
+                                --expdir=./experiments/paper_ppga_"$ENV_NAME"_adaptive_stddev
