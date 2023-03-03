@@ -12,7 +12,7 @@ SEED=1111
 
 RUN_NAME="paper_qdppo_"$ENV_NAME"_seed_"$SEED"_v2"
 echo $RUN_NAME
-srun python -m algorithm.train_qdppo --env_name=$ENV_NAME \
+srun python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --rollout_length=128 \
                                      --use_wandb=True \
                                      --seed=$SEED \

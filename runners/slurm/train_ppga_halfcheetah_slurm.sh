@@ -12,7 +12,7 @@ SEED=1111
 
 RUN_NAME="paper_ppga_"$ENV_NAME"_seed_"$SEED"_adaptive_stddev"
 echo $RUN_NAME
-srun python -m algorithm.train_qdppo --env_name=$ENV_NAME \
+srun python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                 --rollout_length=128 \
                                 --use_wandb=True \
                                 --wandb_group=paper \
