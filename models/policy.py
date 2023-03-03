@@ -16,7 +16,7 @@ class StochasticPolicy(ABC, nn.Module):
 
         if cfg.normalize_obs:
             self.obs_normalizer = NormalizeObservation(cfg.obs_shape)
-        if cfg.normalize_rewards:
+        if cfg.normalize_returns:
             self.reward_normalizer = NormalizeReward()
 
     @abstractmethod

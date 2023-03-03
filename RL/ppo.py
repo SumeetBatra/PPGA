@@ -43,11 +43,13 @@ def calculate_discounted_sum_torch(
 
 
 class PPO:
-    def __init__(self, seed, cfg, vec_env):
-        self.vec_env = vec_env
+    def __init__(self, cfg):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.obs_shape = self.vec_env.single_observation_space.shape
-        self.action_shape = self.vec_env.single_action_space.shape
+        self.cfg = cfg
+        self.seed = cfg.seed
+        self.num_envs = cfg.num_envs
+        self.obs_shape = cfg.obs_shape
+        self.action_shape = cfg.action_shape
 
         agent = Actor(cfg, self.obs_shape, self.action_shape).to(self.device)
         self._agents = [agent]
@@ -57,7 +59,6 @@ class PPO:
                                              action_shape=self.action_shape).to(self.device)
         self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
-        self.cfg = cfg
         self._theta = None  # nn params. Used for compatibility with DQD side
 
         # critic for moving the mean solution point
@@ -70,39 +71,36 @@ class PPO:
         self.episodic_lengths = deque([], maxlen=self.metric_last_n_window)
         self._report_interval = cfg.report_interval
         self.num_intervals = 0
-        self.total_rewards = torch.zeros(self.vec_env.num_envs)
-        self.ep_len = torch.zeros(self.vec_env.num_envs)
+        self.total_rewards = torch.zeros(self.num_envs)
+        self.ep_len = torch.zeros(self.num_envs)
 
         # seeding
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
         # noinspection PyUnresolvedReferences
         torch.backends.cudnn.deterministic = cfg.torch_deterministic
 
         # initialize tensors for training
         self.obs = torch.zeros(
-            (cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_observation_space.shape).to(
+            (cfg.rollout_length, self.num_envs) + self.obs_shape).to(
             self.device)
         self.actions = torch.zeros(
-            (cfg.rollout_length, self.vec_env.num_envs) + self.vec_env.single_action_space.shape).to(
+            (cfg.rollout_length, self.num_envs) + self.action_shape).to(
             self.device)
-        self.logprobs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
-        self.rewards = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
-        self.dones = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
-        self.truncated = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
-        self.values = torch.zeros((cfg.rollout_length, self.vec_env.num_envs)).to(self.device)
-        self.measures = torch.zeros((cfg.rollout_length, self.vec_env.num_envs, self.cfg.num_dims)).to(self.device)
+        self.logprobs = torch.zeros((cfg.rollout_length, self.num_envs)).to(self.device)
+        self.rewards = torch.zeros((cfg.rollout_length, self.num_envs)).to(self.device)
+        self.dones = torch.zeros((cfg.rollout_length, self.num_envs)).to(self.device)
+        self.truncated = torch.zeros((cfg.rollout_length, self.num_envs)).to(self.device)
+        self.values = torch.zeros((cfg.rollout_length, self.num_envs)).to(self.device)
+        self.measures = torch.zeros((cfg.rollout_length, self.num_envs, self.cfg.num_dims)).to(self.device)
 
-        next_obs = self.vec_env.reset()
-        self.next_obs = next_obs.to(self.device)
-        print(f"Reset done! {self.next_obs.shape}")
+        self.next_obs = None
         # for moving the mean solution point w/ ppo
         self._grad_coeffs = torch.zeros(cfg.num_dims + 1).to(self.device)
         self._grad_coeffs[0] = 1.0  # default grad coefficients optimizes objective only
-        self.obs_measure_coeffs = torch.zeros((cfg.rollout_length, self.vec_env.num_envs,
-                                               self.vec_env.single_observation_space.shape[
-                                                   0] + self.cfg.num_dims + 1)).to(self.device)
+        self.obs_measure_coeffs = torch.zeros((cfg.rollout_length, self.num_envs,
+                                               self.obs_shape[0] + self.cfg.num_dims + 1)).to(self.device)
 
     @property
     def agents(self):
@@ -158,7 +156,7 @@ class PPO:
                 next_value = []
                 for i, obs, in enumerate(next_obs):
                     val = self.qd_critic.get_value_at(obs, dim=i)
-                    if self.cfg.normalize_rewards:
+                    if self.cfg.normalize_returns:
                         # need to denormalize the values
                         mean, var = self.vec_inference.rew_normalizers[i].return_rms.mean, self.vec_inference.rew_normalizers[i].return_rms.var
                         val = (torch.clamp(val, -5.0, 5.0) * torch.sqrt(var.to(self.device))) + mean.to(self.device)
@@ -173,7 +171,7 @@ class PPO:
                     # standard ppo
                     next_value = self.qd_critic.get_value(next_obs).reshape(1, -1).to(self.device)
 
-                if self.cfg.normalize_rewards:
+                if self.cfg.normalize_returns:
                     #  need to de-normalize values
                     mean, var = self.vec_inference.rew_normalizers[0].return_rms.mean, self.vec_inference.rew_normalizers[0].return_rms.var
                     next_value = (torch.clamp(next_value, -5.0, 5.0) * torch.sqrt(var)) + mean
@@ -287,10 +285,10 @@ class PPO:
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs, ratio
 
-    def train(self, num_updates, rollout_length, calculate_dqd_gradients=False, move_mean_agent=False,
+    def train(self, vec_env, num_updates, rollout_length, calculate_dqd_gradients=False, move_mean_agent=False,
               negative_measure_gradients=False):
         global_step = 0
-        self.next_obs = self.vec_env.reset()
+        self.next_obs = vec_env.reset()
         if self.cfg.normalize_obs:
             self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
 
@@ -300,7 +298,7 @@ class PPO:
             original_obs_normalizer = None
             if self.cfg.normalize_obs:
                 original_obs_normalizer = self._agents[0].obs_normalizer
-            if self.cfg.normalize_rewards:
+            if self.cfg.normalize_returns:
                 original_reward_normalizer = self._agents[0].reward_normalizer
             # create copy of agent for f and one of each m
             agent_original_params = [copy.deepcopy(solution_params) for _ in range(self.cfg.num_dims + 1)]
@@ -314,7 +312,7 @@ class PPO:
         for update in range(1, num_updates + 1):
             with torch.no_grad():
                 for step in range(rollout_length):
-                    global_step += self.vec_env.num_envs
+                    global_step += self.num_envs
 
                     self.obs[step] = self.next_obs
 
@@ -337,7 +335,7 @@ class PPO:
                     self.actions[step] = action
                     self.logprobs[step] = logprob
 
-                    self.next_obs, reward, dones, infos = self.vec_env.step(action)
+                    self.next_obs, reward, dones, infos = vec_env.step(action)
                     if self.cfg.normalize_obs:
                         self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
 
@@ -354,8 +352,8 @@ class PPO:
                     self.ep_len += 1
 
                     self.next_obs = self.next_obs.to(self.device)
-                    # if self.cfg.normalize_rewards:
-                    #     reward = self.vec_inference.vec_normalize_rewards(reward, self.next_done)
+                    # if self.cfg.normalize_returns:
+                    #     reward = self.vec_inference.vec_normalize_returns(reward, self.next_done)
                     self.rewards[step] = reward.squeeze()
 
                     if not calculate_dqd_gradients and not move_mean_agent:
@@ -384,14 +382,14 @@ class PPO:
                                                                  self.dones, rollout_length=rollout_length,
                                                                  move_mean_agent=move_mean_agent)
                 # normalize the returns
-                if self.cfg.normalize_rewards:
+                if self.cfg.normalize_returns:
                     for i, single_step_returns in enumerate(returns):
-                        returns[i][:] = self.vec_inference.vec_normalize_rewards(single_step_returns)
+                        returns[i][:] = self.vec_inference.vec_normalize_returns(single_step_returns)
 
                 # flatten the batch
-                b_obs = self.obs.transpose(0, 1).reshape((num_agents, -1,) + self.vec_env.single_observation_space.shape)
+                b_obs = self.obs.transpose(0, 1).reshape((num_agents, -1,) + self.obs_shape)
                 b_logprobs = self.logprobs.transpose(0, 1).reshape(num_agents, -1)
-                b_actions = self.actions.transpose(0, 1).reshape((num_agents, -1,) + self.vec_env.single_action_space.shape)
+                b_actions = self.actions.transpose(0, 1).reshape((num_agents, -1,) + self.action_shape)
                 b_advantages = advantages.transpose(0, 1).reshape(num_agents, -1)
                 b_returns = returns.transpose(0, 1).reshape(num_agents, -1)
                 b_values = self.values.transpose(0, 1).reshape(num_agents, -1)
@@ -502,7 +500,7 @@ class PPO:
                                                  obs_shape=self.obs_shape,
                                                  action_shape=self.action_shape)
             f, m, metadata = self.evaluate(self.vec_inference,
-                                           self.vec_env,
+                                           vec_env=vec_env,
                                            obs_normalizer=original_obs_normalizer,
                                            reward_normalizer=original_reward_normalizer)
             return f.reshape(self.vec_inference.num_models, ), \
@@ -567,7 +565,7 @@ class PPO:
             for i, data in enumerate(metadata):
                 data['obs_normalizer'] = obs_normalizer
 
-        if self.cfg.normalize_rewards:
+        if self.cfg.normalize_returns:
             for i, data in enumerate(metadata):
                 data['reward_normalizer'] = reward_normalizer
 

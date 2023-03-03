@@ -48,7 +48,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
 
         if cfg.normalize_obs:
             self.obs_normalizers = [model.obs_normalizer for model in models]
-        if cfg.normalize_rewards:
+        if cfg.normalize_returns:
             self.rew_normalizers = [model.reward_normalizer for model in models]
 
     def _vectorize_layers(self, layer_name, models):
@@ -92,7 +92,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
             # update obs/rew normalizers
             if self.cfg.normalize_obs:
                 model.obs_normalizer = self.obs_normalizers[i]
-            if self.cfg.normalize_rewards:
+            if self.cfg.normalize_returns:
                 model.reward_normalizer = self.rew_normalizers[i]
 
             # update action logprobs
@@ -114,7 +114,7 @@ class VectorizedPolicy(StochasticPolicy, ABC):
             obs[i] = normalizer(model_obs)
         return obs.reshape(-1, obs.shape[-1])
 
-    def vec_normalize_rewards(self, rewards):
+    def vec_normalize_returns(self, rewards):
         # TODO: make this properly vectorized
         num_envs = rewards.shape[0]
         envs_per_model = num_envs // self.num_models
