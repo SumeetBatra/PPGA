@@ -46,10 +46,13 @@ def save_heatmap(archive, heatmap_path, emitter_loc: Optional[tuple[float, ...]]
     plt.close('all')
 
 
-def load_scheduler_from_checkpoint(scheduler_path):
+def load_scheduler_from_checkpoint(scheduler_path, seed, device):
     assert os.path.exists(scheduler_path), f'Error! {scheduler_path=} does not exist'
     with open(scheduler_path, 'rb') as f:
         scheduler = pickle.load(f)
+    # reinstantiate the pytorch generator with the correct seed
+    scheduler.emitters[0].opt.problem._generator = torch.Generator(device=device)
+    scheduler.emitters[0].opt.problem._generator.manual_seed(seed)
     return scheduler
 
 

@@ -102,6 +102,16 @@ def parse_args():
     return cfg
 
 
+def save_scheduler(scheduler, save_path):
+    # cannot pickle generator objects so need to remove it temporarily
+    gen = scheduler.emitters[0].opt.problem._generator
+    scheduler.emitters[0].opt.problem._generator = None
+    # save the scheduler for checkpointing
+    with open(save_path, 'wb') as f:
+        pickle.dump(scheduler, f, protocol=pickle.HIGHEST_PROTOCOL)
+    scheduler.emitters[0].opt.problem._generator = gen
+
+
 def create_scheduler(cfg: AttrDict,
                      archive_learning_rate: float = None,
                      use_result_archive: bool = True,
@@ -133,7 +143,10 @@ def create_scheduler(cfg: AttrDict,
     # threshold for adding solutions to the archive
     threshold_min = -np.inf
 
+    ctrl_cost_upper_bound = np.sum(np.square(np.ones(action_dim,))) * 0.1
+
     bounds = [(0.0, 1.0)] * cfg.num_dims
+    bounds[-1] = (0.0, ctrl_cost_upper_bound)  # last measure is ctrl-cost
     archive_dims = [cfg.grid_size] * cfg.num_dims
 
     if cfg.dqd_algorithm == 'cma_maega':
@@ -160,17 +173,6 @@ def create_scheduler(cfg: AttrDict,
                                      ranges=bounds,
                                      seed=cfg.seed,
                                      qd_offset=qd_offset)
-
-    # TODO: remove code for surrogate archives
-
-    # create the environments and the PPO instance
-    vec_env = make_vec_env_brax(cfg)
-    cfg.batch_size = int(cfg.env_batch_size * cfg.rollout_length)
-    cfg.num_envs = int(cfg.env_batch_size)
-
-    cfg.minibatch_size = int(cfg.batch_size // cfg.num_minibatches)
-    cfg.obs_shape = vec_env.single_observation_space.shape
-    cfg.action_dim = vec_env.single_action_space.shape
 
     ppo = PPO(cfg)
 
@@ -229,18 +231,20 @@ def train_ppga(cfg: AttrDict, vec_env):
     if not logdir.is_dir():
         logdir.mkdir()
     set_file_handler(logdir)
-    save_cfg(str(logdir), cfg)
+    save_cfg(str(exp_dir), cfg)
 
     # checkpointing
-    cp_dir = logdir.joinpath(Path('checkpoints'))
-    cp_dir.mkdir()
+    cp_dir = exp_dir.joinpath(Path('checkpoints'))
+    if not cp_dir.is_dir():
+        cp_dir.mkdir()
 
     # (optional) save 2d archive heatmaps
-    heatmap_dir = logdir.joinpath(Path('heatmaps'))
-    heatmap_dir.mkdir()
+    heatmap_dir = exp_dir.joinpath(Path('heatmaps'))
+    if not heatmap_dir.is_dir():
+        heatmap_dir.mkdir()
 
     # path to summary file
-    summary_filename = os.path.join(str(logdir), 'summary.csv')
+    summary_filename = os.path.join(str(exp_dir), 'summary.csv')
     if os.path.exists(summary_filename):
         os.remove(summary_filename)
     with open(summary_filename, 'w') as f:
@@ -253,10 +257,7 @@ def train_ppga(cfg: AttrDict, vec_env):
 
     if cfg.load_scheduler_from_cp:
         log.info("Loading an existing scheduler!")
-        scheduler = load_scheduler_from_checkpoint(cfg.load_scheduler_from_cp)
-        # reinstantiate the pytorch generator with the correct seed
-        scheduler.emitters[0].opt.problem._generator = torch.Generator(device=device)
-        scheduler.emitters[0].opt.problem._generator.manual_seed(cfg.seed)
+        scheduler = load_scheduler_from_checkpoint(cfg.load_scheduler_from_cp, cfg.seed, device)
     else:
         scheduler = create_scheduler(cfg, use_result_archive=use_result_archive)
 
@@ -391,67 +392,65 @@ def train_ppga(cfg: AttrDict, vec_env):
             save_heatmap(result_archive, os.path.join(str(heatmap_dir), f'heatmap_{itr:05d}.png'),
                          emitter_loc=emitter_loc, forces=None)
 
-            # Save the archive at the given frequency.
-            # Always save on the final iteration.
-            final_itr = itr == itrs
-            if (itr > 0 and itr % log_arch_freq == 0) or final_itr:
-                final_cp_dir = os.path.join(cp_dir, f'cp_{itr:08d}')
-                if not os.path.exists(final_cp_dir):
-                    os.mkdir(final_cp_dir)
-                # Save a full archive for analysis.
-                df = result_archive.as_pandas(include_solutions=True)
-                df.to_pickle(os.path.join(final_cp_dir, f"archive_{itr:08d}.pkl"))
-                scheduler.emitters[0].opt.problem._generator = None  # cannot pickle generator objects so need to remove it
-                # save the scheduler for checkpointing
-                with open(os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl'), 'wb') as f:
-                    pickle.dump(scheduler, f)
+        # Save the archive at the given frequency.
+        # Always save on the final iteration.
+        final_itr = itr == itrs
+        if (itr > 0 and itr % log_arch_freq == 0) or final_itr:
+            final_cp_dir = os.path.join(cp_dir, f'cp_{itr:08d}')
+            if not os.path.exists(final_cp_dir):
+                os.mkdir(final_cp_dir)
+            # Save a full archive for analysis.
+            df = result_archive.as_pandas(include_solutions=True)
+            df.to_pickle(os.path.join(final_cp_dir, f"archive_df_{itr:08d}.pkl"))
 
-                # save the top 2 checkpoints, delete older ones
-                while len(get_checkpoints(str(cp_dir))) > 2:
-                    oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
-                    if os.path.exists(oldest_checkpoint):
-                        log.info(f'Removing checkpoint {oldest_checkpoint}')
-                        shutil.rmtree(oldest_checkpoint)
+            scheduler_savepath = os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl')
+            save_scheduler(scheduler, scheduler_savepath)
 
-                # Update the summary statistics for the archive
-                if (itr > 0 and itr % log_freq == 0) or final_itr:
-                    with open(summary_filename, 'a') as summary_file:
-                        writer = csv.writer(summary_file)
-                        data = [itr, result_archive.stats.qd_score, result_archive.stats.coverage,
-                                result_archive.stats.obj_max, result_archive.stats.obj_mean]
-                        writer.writerow(data)
+        # save the top 2 checkpoints, delete older ones
+        while len(get_checkpoints(str(cp_dir))) > 2:
+            oldest_checkpoint = get_checkpoints(str(cp_dir))[0]
+            if os.path.exists(oldest_checkpoint):
+                log.info(f'Removing checkpoint {oldest_checkpoint}')
+                shutil.rmtree(oldest_checkpoint)
 
-            if (itr > 0 and itr % log_freq == 0 and cfg.take_archive_snapshots) or (
-                    final_itr and cfg.take_archive_snapshots):
-                with open(archive_snapshot_filename, 'a') as archive_snapshot_file:
-                    writer = csv.writer(archive_snapshot_file)
-                    num_cells = np.prod(scheduler.result_archive.dims)
-                    elite_scores = [0 for _ in range(num_cells)]
-                    for elite in scheduler.result_archive:
-                        score, index = elite.objective, elite.index
-                        elite_scores[index] = score
-                    data = [itr] + elite_scores
-                    writer.writerow(data)
+        # Update the summary statistics for the archive
+        if (itr > 0 and itr % log_freq == 0) or final_itr:
+            with open(summary_filename, 'a') as summary_file:
+                writer = csv.writer(summary_file)
+                data = [itr, result_archive.stats.qd_score, result_archive.stats.coverage,
+                        result_archive.stats.obj_max, result_archive.stats.obj_mean]
+                writer.writerow(data)
 
-            if cfg.use_wandb:
-                with torch.no_grad():
-                    normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
+        if (itr > 0 and itr % log_freq == 0 and cfg.take_archive_snapshots) or (final_itr and cfg.take_archive_snapshots):
+            with open(archive_snapshot_filename, 'a') as archive_snapshot_file:
+                writer = csv.writer(archive_snapshot_file)
+                num_cells = np.prod(scheduler.result_archive.dims)
+                elite_scores = [0 for _ in range(num_cells)]
+                for elite in scheduler.result_archive:
+                    score, index = elite.objective, elite.index
+                    elite_scores[index] = score
+                data = [itr] + elite_scores
+                writer.writerow(data)
+
+        if cfg.use_wandb:
+            with torch.no_grad():
+                normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
+            wandb.log({
+                "QD/QD Score": scheduler.result_archive.offset_qd_score,
+                # use regular archive for qd score because it factors in the reward offset
+                "QD/average performance": result_archive.stats.obj_mean,
+                "QD/coverage (%)": result_archive.stats.coverage * 100.0,
+                "QD/best score": result_archive.stats.obj_max,
+                "QD/iteration": itr,
+                "QD/restarts": scheduler.emitters[0].restarts,
+                'QD/mean_coeff_obj': mean_grad_coeffs[0][0],
+                'XNES/norm_A': normA
+            })
+            for i in range(1, cfg.num_dims + 1):
                 wandb.log({
-                    "QD/QD Score": scheduler.result_archive.offset_qd_score,
-                    # use regular archive for qd score because it factors in the reward offset
-                    "QD/average performance": result_archive.stats.obj_mean,
-                    "QD/coverage (%)": result_archive.stats.coverage * 100.0,
-                    "QD/best score": result_archive.stats.obj_max,
-                    "QD/iteration": itr,
-                    "QD/restarts": scheduler.emitters[0].restarts,
-                    'QD/mean_coeff_obj': mean_grad_coeffs[0][0],
-                    'XNES/norm_A': normA
+                    'QD/iteration': itr,
+                    f'QD/mean_coeff_measure{i}': mean_grad_coeffs[0][i]
                 })
-                for i in range(1, cfg.num_dims + 1):
-                    wandb.log({
-                        'QD/iteration': itr,
-                        f'QD/mean_coeff_measure{i}': mean_grad_coeffs[0][i]
-                    })
 
 
 if __name__ == '__main__':
