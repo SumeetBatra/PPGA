@@ -5,19 +5,18 @@ import gym
 
 from abc import ABC, abstractmethod
 from torch.distributions import MultivariateNormal, Categorical
-from utils.normalize_obs import NormalizeReward, NormalizeObservation
+from utils.normalize import ReturnNormalizer, ObsNormalizer
 
 
 class StochasticPolicy(ABC, nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, normalize_obs=False, obs_shape=None, normalize_returns=False):
         super().__init__()
-        self.cfg = cfg
         self.layers: nn.Sequential
 
-        if cfg.normalize_obs:
-            self.obs_normalizer = NormalizeObservation(cfg.obs_shape)
-        if cfg.normalize_returns:
-            self.reward_normalizer = NormalizeReward()
+        if normalize_obs:
+            assert obs_shape is not None, 'Normalize obs is enabled but no obs_shape was given'
+        self.obs_normalizer = ObsNormalizer(obs_shape) if normalize_obs else None
+        self.return_normalizer = ReturnNormalizer() if normalize_returns else None
 
     @abstractmethod
     def forward(self, obs):

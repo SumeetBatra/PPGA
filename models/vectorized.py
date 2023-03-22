@@ -5,7 +5,7 @@ import numpy as np
 from models.policy import StochasticPolicy
 from abc import ABC, abstractmethod
 from typing import List
-from utils.normalize_obs import NormalizeReward, NormalizeObservation
+from utils.normalize import ReturnNormalizer, ObsNormalizer
 from torch.amp import autocast
 
 
@@ -34,8 +34,8 @@ class VectorizedLinearBlock(nn.Module):
 
 
 class VectorizedPolicy(StochasticPolicy, ABC):
-    def __init__(self, cfg, models, model_fn, **kwargs):
-        StochasticPolicy.__init__(self, cfg)
+    def __init__(self, models, model_fn, obs_shape, action_shape, normalize_obs=False, normalize_returns=False):
+        StochasticPolicy.__init__(self, normalize_obs=normalize_obs, obs_shape=obs_shape, normalize_returns=normalize_returns)
         if not isinstance(models, np.ndarray):
             models = np.array(models)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -44,12 +44,15 @@ class VectorizedPolicy(StochasticPolicy, ABC):
         self.blocks: List[VectorizedLinearBlock]
         self.actor_mean: nn.Sequential
         self.actor_logstd: nn.Parameter
-        self.kwargs = kwargs
+        self.normalize_obs = normalize_obs
+        self.normalize_returns = normalize_returns
+        self.obs_shape = obs_shape
+        self.action_shape = action_shape
 
-        if cfg.normalize_obs:
+        if normalize_obs:
             self.obs_normalizers = [model.obs_normalizer for model in models]
-        if cfg.normalize_returns:
-            self.rew_normalizers = [model.reward_normalizer for model in models]
+        if normalize_returns:
+            self.rew_normalizers = [model.return_normalizer for model in models]
 
     def _vectorize_layers(self, layer_name, models):
         '''
@@ -80,7 +83,8 @@ class VectorizedPolicy(StochasticPolicy, ABC):
         '''
         Returns a list of models view of the object
         '''
-        models = [self.model_fn(cfg=self.cfg, **self.kwargs) for _ in range(self.num_models)]
+        models = [self.model_fn(self.obs_shape, self.action_shape, self.normalize_obs, self.normalize_returns)
+                  for _ in range(self.num_models)]
         for i, model in enumerate(models):
             for l, layer in enumerate(self.actor_mean):
                 # layer could be a nonlinearity
@@ -90,10 +94,10 @@ class VectorizedPolicy(StochasticPolicy, ABC):
                 model.actor_mean[l].bias.data = layer.bias.data[i]
 
             # update obs/rew normalizers
-            if self.cfg.normalize_obs:
+            if self.normalize_obs:
                 model.obs_normalizer = self.obs_normalizers[i]
-            if self.cfg.normalize_returns:
-                model.reward_normalizer = self.rew_normalizers[i]
+            if self.normalize_returns:
+                model.return_normalizer = self.rew_normalizers[i]
 
             # update action logprobs
             model.actor_logstd.data = self.actor_logstd[i]
@@ -123,20 +127,10 @@ class VectorizedPolicy(StochasticPolicy, ABC):
             rewards[i] = normalizer(model_rews)
         return rewards.reshape(-1)
 
-    def vec_normalize_measures(self, measures, next_done):
-        # TODO: make this properly vectorized
-        num_envs = measures.shape[0]
-        envs_per_model = num_envs // self.num_models
-        measures = measures.reshape(self.num_models, envs_per_model, self.cfg.num_dims)
-        next_dones = next_done.reshape(self.num_models, envs_per_model)
-        for i, (model_rews, dones, normalizer) in enumerate(zip(measures, next_dones, self.measure_normalizers)):
-            measures[i] = normalizer(model_rews, dones)
-        return measures.reshape(num_envs, -1)
-
 
 class VectorizedActor(VectorizedPolicy):
-    def __init__(self, cfg, models, model_fn, **kwargs):
-        VectorizedPolicy.__init__(self, cfg, models, model_fn, **kwargs)
+    def __init__(self, models, model_fn, obs_shape, action_shape, normalize_obs=False, normalize_returns=False):
+        VectorizedPolicy.__init__(self, models, model_fn, obs_shape, action_shape, normalize_obs=normalize_obs, normalize_returns=normalize_returns)
         self.blocks = self._vectorize_layers('actor_mean', models)
         self.actor_mean = nn.Sequential(*self.blocks)
         action_logprobs = [model.actor_logstd for model in models]
@@ -155,8 +149,6 @@ class VectorizedActor(VectorizedPolicy):
         action_logstd = action_logstd.expand_as(action_mean)
         action_std = torch.exp(action_logstd)
         probs = torch.distributions.Normal(action_mean, action_std)
-        # cov_mat = torch.diag_embed(action_std)
-        # probs = torch.distributions.MultivariateNormal(action_mean, cov_mat)
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action).sum(1), probs.entropy()

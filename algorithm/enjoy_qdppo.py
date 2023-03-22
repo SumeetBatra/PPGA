@@ -27,6 +27,6 @@ if __name__ == '__main__':
     # elites.query('measure_0 > 0.7').query('measure_1 < 0.2').query('measure_2 < 0.2').query('measure_3 < 0.2')
     # agent_params = elites.query('0').to_numpy()[6:]
     # agent = Actor(cfg, obs_shape=(87,), action_shape=(8,)).deserialize(agent_params)
-    scheduler_path = '/home/sumeet/QDPPO/experiments/debug/1111/checkpoints/cp_00002000/scheduler_00002000.pkl'
+    scheduler_path = 'experiments/paper_qdppo_halfcheetah/1111/checkpoints/cp_00002000/scheduler_00002000.pkl'
     load_scheduler(scheduler_path)
     pass

@@ -37,7 +37,7 @@ class RunningMeanStd(nn.Module):
         return new_mean, new_var, new_count
 
 
-class NormalizeObservation(nn.Module):
+class ObsNormalizer(nn.Module):
     """This wrapper will normalize observations s.t. each coordinate is centered with unit variance.
     Note:
         The normalization depends on past trajectories and observations
@@ -51,7 +51,7 @@ class NormalizeObservation(nn.Module):
             env (Env): The environment to apply the wrapper
             epsilon: A stability parameter that is used when scaling the observations.
         """
-        super(NormalizeObservation, self).__init__()
+        super(ObsNormalizer, self).__init__()
         self.obs_rms = RunningMeanStd(shape=obs_space_shape)
         self.epsilon = epsilon
 
@@ -67,7 +67,7 @@ class NormalizeObservation(nn.Module):
         return (obs - self.obs_rms.mean) / torch.sqrt(self.obs_rms.var + self.epsilon)
 
 
-class NormalizeReward(nn.Module):
+class ReturnNormalizer(nn.Module):
     r"""This wrapper will normalize immediate rewards s.t. their exponential moving average has a fixed variance.
     The exponential moving average will have variance :math:`(1 - \gamma)^2`.
     Note:
@@ -76,7 +76,7 @@ class NormalizeReward(nn.Module):
     """
 
     def __init__(self, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8):
-        super(NormalizeReward, self).__init__()
+        super(ReturnNormalizer, self).__init__()
         self.return_rms = RunningMeanStd(shape=(reward_dim,))
         self.gamma = gamma
         self.epsilon = epsilon

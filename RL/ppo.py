@@ -1,5 +1,7 @@
 from typing import List, Optional
 
+import brax.envs
+import gym
 import numpy as np
 import random
 import copy
@@ -51,12 +53,13 @@ class PPO:
         self.obs_shape = cfg.obs_shape
         self.action_shape = cfg.action_shape
 
-        agent = Actor(cfg, self.obs_shape, self.action_shape).to(self.device)
+        agent = Actor(self.obs_shape, self.action_shape, normalize_obs=cfg.normalize_obs, normalize_returns=cfg.normalize_returns).to(self.device)
         self._agents = [agent]
         critic = QDCritic(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
         self.qd_critic = critic
-        self.vec_inference = VectorizedActor(cfg, self._agents, Actor, obs_shape=self.obs_shape,
-                                             action_shape=self.action_shape).to(self.device)
+        self.vec_inference = VectorizedActor(self._agents, Actor, obs_shape=self.obs_shape,
+                                             action_shape=self.action_shape, normalize_obs=cfg.normalize_obs,
+                                             normalize_returns=cfg.normalize_returns).to(self.device)
         self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self.qd_critic_optim = torch.optim.Adam(self.qd_critic.parameters(), lr=cfg.learning_rate, eps=1e-5)
         self._theta = None  # nn params. Used for compatibility with DQD side
@@ -109,9 +112,7 @@ class PPO:
     @agents.setter
     def agents(self, agents):
         self._agents = agents
-        self.vec_inference = VectorizedActor(self.cfg, self._agents, Actor,
-                                             obs_shape=self.obs_shape,
-                                             action_shape=self.action_shape)
+        self.vec_inference = VectorizedActor(self._agents, Actor, self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns)
         self.vec_optimizer = torch.optim.Adam(self.vec_inference.parameters(), lr=self.cfg.learning_rate, eps=1e-5)
 
     @property
@@ -299,10 +300,10 @@ class PPO:
             if self.cfg.normalize_obs:
                 original_obs_normalizer = self._agents[0].obs_normalizer
             if self.cfg.normalize_returns:
-                original_reward_normalizer = self._agents[0].reward_normalizer
+                original_return_normalizer = self._agents[0].return_normalizer
             # create copy of agent for f and one of each m
             agent_original_params = [copy.deepcopy(solution_params) for _ in range(self.cfg.num_dims + 1)]
-            agents = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(params) for params in
+            agents = [Actor(self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns).deserialize(params) for params in
                       agent_original_params]
             self.agents = agents
 
@@ -494,21 +495,19 @@ class PPO:
             jacobian = (new_params - agent_original_params).reshape(self.cfg.num_emitters, self.cfg.num_dims + 1, -1)
 
             # TODO: make this work for multiple emitters
-            original_agent = [Actor(self.cfg, self.obs_shape, self.action_shape).deserialize(solution_params).to(
+            original_agent = [Actor(self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns).deserialize(solution_params).to(
                 self.device)]
-            self.vec_inference = VectorizedActor(self.cfg, original_agent, Actor,
-                                                 obs_shape=self.obs_shape,
-                                                 action_shape=self.action_shape)
+            self.vec_inference = VectorizedActor(original_agent, Actor, self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns)
             f, m, metadata = self.evaluate(self.vec_inference,
                                            vec_env=vec_env,
                                            obs_normalizer=original_obs_normalizer,
-                                           reward_normalizer=original_reward_normalizer)
+                                           return_normalizer=original_return_normalizer)
             return f.reshape(self.vec_inference.num_models, ), \
                 m.reshape(self.vec_inference.num_models, -1), \
                 jacobian, \
                 metadata
 
-    def evaluate(self, vec_agent, vec_env, verbose=True, obs_normalizer=None, reward_normalizer=None):
+    def evaluate(self, vec_agent, vec_env, verbose=True, obs_normalizer=None, return_normalizer=None):
         '''
         Evaluate all agents for one episode
         :param vec_agent: Vectorized agents for vectorized inference
@@ -567,7 +566,7 @@ class PPO:
 
         if self.cfg.normalize_returns:
             for i, data in enumerate(metadata):
-                data['reward_normalizer'] = reward_normalizer
+                data['return_normalizer'] = return_normalizer
 
         if verbose:
             np.set_printoptions(suppress=True)

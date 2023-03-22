@@ -16,8 +16,12 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
 
 
 class Actor(StochasticPolicy):
-    def __init__(self, cfg: AttrDict, obs_shape: Union[int, tuple], action_shape: np.ndarray):
-        super().__init__(cfg)
+    def __init__(self,
+                 obs_shape: Union[int, tuple],
+                 action_shape: np.ndarray,
+                 normalize_obs: bool = False,
+                 normalize_returns: bool = False):
+        StochasticPolicy.__init__(self, normalize_obs=normalize_obs, obs_shape=obs_shape, normalize_returns=normalize_returns)
 
         self.actor_mean = nn.Sequential(
             layer_init(nn.Linear(np.array(obs_shape).prod(), 128)),

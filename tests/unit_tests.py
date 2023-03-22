@@ -8,7 +8,7 @@ from time import time
 from utils.utilities import log
 from models.vectorized import VectorizedPolicy, VectorizedLinearBlock, VectorizedActor
 from models.actor_critic import Actor, PGAMEActor
-from utils.normalize_obs import NormalizeReward, VecRewardNormalizer
+from utils.normalize import ReturnNormalizer, VecRewardNormalizer
 
 TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
             'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0, 'obs_dim': 28,
@@ -188,7 +188,7 @@ def test_vectorized_rew_normalizer():
     envs_per_model = 5
     num_models = 10
     num_envs = num_models * envs_per_model
-    rew_norms = [NormalizeReward(envs_per_model) for _ in range(10)]
+    rew_norms = [ReturnNormalizer(envs_per_model) for _ in range(10)]
     means = [norm.return_rms.mean for norm in rew_norms]
     vars = [norm.return_rms.var for norm in rew_norms]
     means = torch.Tensor(means)

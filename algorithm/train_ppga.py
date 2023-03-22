@@ -20,7 +20,7 @@ from RL.ppo import PPO
 from utils.utilities import log, config_wandb, get_checkpoints, set_file_handler
 from models.actor_critic import Actor
 from envs.brax_custom.brax_env import make_vec_env_brax
-from utils.normalize_obs import NormalizeReward, NormalizeObservation
+from utils.normalize import ReturnNormalizer, ObsNormalizer
 from utils.utilities import save_cfg
 from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint
 from envs.brax_custom import reward_offset
@@ -71,7 +71,7 @@ def parse_args():
     parser.add_argument("--target_kl", type=float, default=None,
                         help="the target KL divergence threshold")
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
-    parser.add_argument('--normalize_returns', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
+    parser.add_argument('--normalize_returns', type=lambda x: bool(strtobool(x)), default=False, help='Normalize returns across a batch using running mean and stddev')
     parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False, help='Use bootstrap value estimates')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
 
@@ -136,7 +136,7 @@ def create_scheduler(cfg: AttrDict,
     qd_offset = reward_offset[cfg.env_name]
 
     if initial_sol is None:
-        initial_agent = Actor(cfg, obs_shape, action_shape)
+        initial_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns)
         initial_sol = initial_agent.serialize()
     solution_dim = len(initial_sol)
     mode = 'batch'
@@ -293,7 +293,7 @@ def train_ppga(cfg: AttrDict, vec_env):
     for itr in range(starting_iter, itrs + 1):
         # Current solution point. returns a single sol per emitter
         solution_batch = scheduler.ask_dqd()
-        mean_agent = Actor(cfg, obs_shape, action_shape).deserialize(solution_batch.flatten()).to(device)
+        mean_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(solution_batch.flatten()).to(device)
         # whether to reset the stddev param for the action distribution
         if not cfg.adaptive_stddev:
             mean_agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
@@ -303,8 +303,8 @@ def train_ppga(cfg: AttrDict, vec_env):
                 mean_agent.obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
 
         if cfg.normalize_returns:
-            if scheduler.emitters[0].mean_agent_reward_normalizer is not None:
-                mean_agent.reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
+            if scheduler.emitters[0].mean_agent_return_normalizer is not None:
+                mean_agent.return_normalizer = scheduler.emitters[0].mean_agent_return_normalizer
 
         ppo.agents = [mean_agent]
         # calculate gradients of f and m
@@ -323,7 +323,7 @@ def train_ppga(cfg: AttrDict, vec_env):
 
         # using grads from previous step, sample a batch of branched solution points and evaluate their f and m
         branched_sols = scheduler.ask()
-        branched_agents = [Actor(cfg, obs_shape, action_shape).deserialize(sol).to(device) for sol in branched_sols]
+        branched_agents = [Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(sol).to(device) for sol in branched_sols]
         for agent in branched_agents:
             agent.actor_logstd.data = mean_agent.actor_logstd.data
         ppo.agents = branched_agents
@@ -331,14 +331,14 @@ def train_ppga(cfg: AttrDict, vec_env):
         # since we branched from mean_agent, we will use its obs/return normalizer for the branched agents
         # if obs/return normalization is enabled
         eval_obs_normalizer = mean_agent.obs_normalizer if cfg.normalize_obs else None
-        eval_rew_normalizer = mean_agent.reward_normalizer if cfg.normalize_returns else None
+        eval_rew_normalizer = mean_agent.return_normalizer if cfg.normalize_returns else None
 
         # evaluate the f and m of each branched agent
         objs, measures, metadata = ppo.evaluate(ppo.vec_inference,
                                                 vec_env,
                                                 verbose=True,
                                                 obs_normalizer=eval_obs_normalizer,
-                                                reward_normalizer=eval_rew_normalizer)
+                                                return_normalizer=eval_rew_normalizer)
 
         if cfg.weight_decay:
             reg_loss = cfg.weight_decay * np.array([np.linalg.norm(sol) for sol in branched_sols]).reshape(objs.shape)
@@ -351,13 +351,13 @@ def train_ppga(cfg: AttrDict, vec_env):
         if restarted:
             log.debug("Emitter restarted. Changing the mean agent...")
             mean_soln_point = scheduler.emitters[0].theta
-            mean_agent = Actor(cfg, obs_shape, action_shape).deserialize(mean_soln_point).to(device)
+            mean_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(mean_soln_point).to(device)
 
             # load the obs/return normalizer used for this agent
             if cfg.normalize_obs:
                 mean_agent.obs_normalizer = scheduler.emitters[0].mean_agent_obs_normalizer
             if cfg.normalize_returns:
-                mean_agent.reward_normalizer = scheduler.emitters[0].mean_agent_reward_normalizer
+                mean_agent.return_normalizer = scheduler.emitters[0].mean_agent_return_normalizer
             if not cfg.adaptive_stddev:
                 mean_agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
 
@@ -379,11 +379,11 @@ def train_ppga(cfg: AttrDict, vec_env):
         trained_mean_agent = ppo.agents[0]
         scheduler.emitters[0].update_theta(trained_mean_agent.serialize())
 
-        # update the obs and reward normalizers in the scheduler
+        # update the obs and return normalizers in the scheduler
         if cfg.normalize_obs:
             scheduler.emitters[0].mean_agent_obs_normalizer = trained_mean_agent.obs_normalizer
         if cfg.normalize_returns:
-            scheduler.emitters[0].mean_agent_reward_normalizer = trained_mean_agent.reward_normalizer
+            scheduler.emitters[0].mean_agent_return_normalizer = trained_mean_agent.return_normalizer
 
         # logging
         log.debug(f'{itr=}, {itrs=}, Progress: {(100.0 * (itr / itrs)):.2f}%')
@@ -437,7 +437,7 @@ def train_ppga(cfg: AttrDict, vec_env):
                 normA = torch.linalg.norm(scheduler.emitters[0].opt.A).cpu().numpy().item()
             wandb.log({
                 "QD/QD Score": scheduler.result_archive.offset_qd_score,
-                # use regular archive for qd score because it factors in the reward offset
+                # use regular archive for qd score because it factors in the return offset
                 "QD/average performance": result_archive.stats.obj_mean,
                 "QD/coverage (%)": result_archive.stats.coverage * 100.0,
                 "QD/best score": result_archive.stats.obj_max,
