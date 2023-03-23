@@ -375,10 +375,14 @@ def evaluate_pga_me_archive(archive_dir):
     save_heatmap(archive, heatmap_path)
 
 
-def load_and_eval_archive(archive_path):
-    archive_df = load_archive(archive_path)
-    env_cfg = AttrDict({'env_name': 'ant', 'num_dims': 4, 'seed': 1111})
-    reevaluate_archive(archive_df, env_cfg)
+def archive_df_to_archive(archive_df: pandas.DataFrame, **kwargs):
+    solution_batch = archive_df.filter(regex='solution*').to_numpy()
+    measures_batch = archive_df.filter(regex='measure*').to_numpy()
+    obj_batch = archive_df.filter(regex='objective').to_numpy().flatten()
+    metadata_batch = archive_df.filter(regex='metadata').to_numpy().flatten()
+    archive = GridArchive(**kwargs)
+    archive.add(solution_batch, obj_batch, measures_batch, metadata_batch)
+    return archive
 
 
 if __name__ == '__main__':

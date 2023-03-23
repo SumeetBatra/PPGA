@@ -22,7 +22,7 @@ from models.actor_critic import Actor
 from envs.brax_custom.brax_env import make_vec_env_brax
 from utils.normalize import ReturnNormalizer, ObsNormalizer
 from utils.utilities import save_cfg
-from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint
+from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint, archive_df_to_archive
 from envs.brax_custom import reward_offset
 
 
@@ -82,7 +82,12 @@ def parse_args():
     parser.add_argument("--num_dims", type=int, required=True, help="Dimensionality of measures")
     parser.add_argument("--popsize", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
     parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
+    parser.add_argument('--save_scheduler', type=lambda x: bool(strtobool(x)), default=True, help='Choose whether or not to save the scheduler during checkpointing. If the archive is too big,'
+                                                                                                  'it may be impractical to save both the scheduler and the archive_df. However, you cannot later restart from '
+                                                                                                  'a scheduler checkpoint and instead will have to restart from an archive_df checkpoint, which may impact the performance of the run.')
     parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
+    parser.add_argument('--load_archive_from_cp', type=str, default=None, help='Load an existing archive from a checkpoint path. This can be used as an alternative to loading the scheduler if save_scheduler'
+                                                                               'was disabled and only the archive df checkpoint is available. However, this can affect the performance of the run. Cannot be used together with save_scheduler')
     parser.add_argument('--total_iterations', type=int, default=100, help='Number of iterations to run the entire dqd-rl loop')
     parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'], help='Which DQD algorithm should be running in the outer loop')
     parser.add_argument('--expdir', type=str, help='Experiment results directory')
@@ -158,21 +163,42 @@ def create_scheduler(cfg: AttrDict,
         else:
             archive_learning_rate = 1.0
 
-    archive = GridArchive(solution_dim=solution_dim,
-                          dims=archive_dims,
-                          ranges=bounds,
-                          learning_rate=archive_learning_rate,
-                          threshold_min=threshold_min,
-                          seed=cfg.seed,
-                          qd_offset=qd_offset)
+    archive, result_archive = None, None
+    if cfg.load_archive_from_cp is not None and cfg.load_scheduler_from_cp is None:
+        log.info('Loading an existing archive dataframe...')
+        with open(cfg.load_archive_from_cp, 'rb') as f:
+            archive_df = pickle.load(f)
+        archive = archive_df_to_archive(archive_df,
+                                        solution_dim=solution_dim,
+                                        dims=archive_dims,
+                                        ranges=bounds,
+                                        learning_rate=archive_learning_rate,
+                                        threshold_min=threshold_min,
+                                        seed=cfg.seed,
+                                        qd_offset=qd_offset)
 
-    result_archive = None
-    if use_result_archive:
-        result_archive = GridArchive(solution_dim=solution_dim,
-                                     dims=archive_dims,
-                                     ranges=bounds,
-                                     seed=cfg.seed,
-                                     qd_offset=qd_offset)
+        if use_result_archive:
+            result_archive = archive_df_to_archive(archive_df,
+                                                   solution_dim=solution_dim,
+                                                   dims=archive_dims,
+                                                   ranges=bounds,
+                                                   seed=cfg.seed,
+                                                   qd_offset=qd_offset)
+    else:
+        archive = GridArchive(solution_dim=solution_dim,
+                              dims=archive_dims,
+                              ranges=bounds,
+                              learning_rate=archive_learning_rate,
+                              threshold_min=threshold_min,
+                              seed=cfg.seed,
+                              qd_offset=qd_offset)
+
+        if use_result_archive:
+            result_archive = GridArchive(solution_dim=solution_dim,
+                                         dims=archive_dims,
+                                         ranges=bounds,
+                                         seed=cfg.seed,
+                                         qd_offset=qd_offset)
 
     ppo = PPO(cfg)
 
@@ -400,11 +426,12 @@ def train_ppga(cfg: AttrDict, vec_env):
             if not os.path.exists(final_cp_dir):
                 os.mkdir(final_cp_dir)
             # Save a full archive for analysis.
-            df = result_archive.as_pandas(include_solutions=True)
+            df = result_archive.as_pandas(include_solutions=True, include_metadata=True)
             df.to_pickle(os.path.join(final_cp_dir, f"archive_df_{itr:08d}.pkl"))
 
-            scheduler_savepath = os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl')
-            save_scheduler(scheduler, scheduler_savepath)
+            if cfg.save_scheduler:
+                scheduler_savepath = os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl')
+                save_scheduler(scheduler, scheduler_savepath)
 
         # save the top 2 checkpoints, delete older ones
         while len(get_checkpoints(str(cp_dir))) > 2:
@@ -470,7 +497,7 @@ if __name__ == '__main__':
                      wandb_project=cfg.wandb_project, wandb_group=cfg.wandb_group, cfg=cfg)
     outdir = os.path.join(cfg.expdir, str(cfg.seed))
     cfg.outdir = outdir
-    assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None,\
+    assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None or cfg.load_archive_from_cp is not None,\
         f"Warning: experiment dir {outdir} exists. Danger of overwriting previous run"
     if not os.path.exists(outdir):
         os.makedirs(outdir)
