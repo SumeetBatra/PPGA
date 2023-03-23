@@ -28,11 +28,12 @@ from envs.brax_custom import reward_offset
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    #PPO params
+    # PPO params
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument("--torch_deterministic", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
+    parser.add_argument("--torch_deterministic", type=lambda x: bool(strtobool(x)), default=False, nargs="?",
+                        const=True,
                         help="if toggled, `torch.backends.cudnn.deterministic=False`")
     parser.add_argument("--use_wandb", default=False, type=lambda x: bool(strtobool(x)),
                         help='Use weights and biases to track the exp')
@@ -70,9 +71,12 @@ def parse_args():
                         help="the maximum norm for the gradient clipping")
     parser.add_argument("--target_kl", type=float, default=None,
                         help="the target KL divergence threshold")
-    parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
-    parser.add_argument('--normalize_returns', type=lambda x: bool(strtobool(x)), default=False, help='Normalize returns across a batch using running mean and stddev')
-    parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False, help='Use bootstrap value estimates')
+    parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False,
+                        help='Normalize observations across a batch using running mean and stddev')
+    parser.add_argument('--normalize_returns', type=lambda x: bool(strtobool(x)), default=False,
+                        help='Normalize returns across a batch using running mean and stddev')
+    parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False,
+                        help='Use bootstrap value estimates')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
 
     # QD Params
@@ -80,27 +84,42 @@ def parse_args():
                                                                     " CMA-ES instances exploring the archive")
     parser.add_argument('--grid_size', type=int, required=True, help='Number of cells per archive dimension')
     parser.add_argument("--num_dims", type=int, required=True, help="Dimensionality of measures")
-    parser.add_argument("--popsize", type=int, required=True, help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
-    parser.add_argument('--log_arch_freq', type=int, default=10, help='Frequency in num iterations at which we checkpoint the archive')
-    parser.add_argument('--save_scheduler', type=lambda x: bool(strtobool(x)), default=True, help='Choose whether or not to save the scheduler during checkpointing. If the archive is too big,'
-                                                                                                  'it may be impractical to save both the scheduler and the archive_df. However, you cannot later restart from '
-                                                                                                  'a scheduler checkpoint and instead will have to restart from an archive_df checkpoint, which may impact the performance of the run.')
-    parser.add_argument('--load_scheduler_from_cp', type=str, default=None, help='Load an existing QD scheduler from a checkpoint path')
-    parser.add_argument('--load_archive_from_cp', type=str, default=None, help='Load an existing archive from a checkpoint path. This can be used as an alternative to loading the scheduler if save_scheduler'
-                                                                               'was disabled and only the archive df checkpoint is available. However, this can affect the performance of the run. Cannot be used together with save_scheduler')
-    parser.add_argument('--total_iterations', type=int, default=100, help='Number of iterations to run the entire dqd-rl loop')
-    parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'], help='Which DQD algorithm should be running in the outer loop')
+    parser.add_argument("--popsize", type=int, required=True,
+                        help="Branching factor for each step of MEGA i.e. the number of branching solutions from the current solution point")
+    parser.add_argument('--log_arch_freq', type=int, default=10,
+                        help='Frequency in num iterations at which we checkpoint the archive')
+    parser.add_argument('--save_scheduler', type=lambda x: bool(strtobool(x)), default=True,
+                        help='Choose whether or not to save the scheduler during checkpointing. If the archive is too big,'
+                             'it may be impractical to save both the scheduler and the archive_df. However, you cannot later restart from '
+                             'a scheduler checkpoint and instead will have to restart from an archive_df checkpoint, which may impact the performance of the run.')
+    parser.add_argument('--load_scheduler_from_cp', type=str, default=None,
+                        help='Load an existing QD scheduler from a checkpoint path')
+    parser.add_argument('--load_archive_from_cp', type=str, default=None,
+                        help='Load an existing archive from a checkpoint path. This can be used as an alternative to loading the scheduler if save_scheduler'
+                             'was disabled and only the archive df checkpoint is available. However, this can affect the performance of the run. Cannot be used together with save_scheduler')
+    parser.add_argument('--total_iterations', type=int, default=100,
+                        help='Number of iterations to run the entire dqd-rl loop')
+    parser.add_argument('--dqd_algorithm', type=str, choices=['cma_mega_adam', 'cma_maega'],
+                        help='Which DQD algorithm should be running in the outer loop')
     parser.add_argument('--expdir', type=str, help='Experiment results directory')
-    parser.add_argument('--save_heatmaps', type=lambda x: bool(strtobool(x)), default=True, help='Save the archive heatmaps. Only applies to archives with <= 2 measures')
-    parser.add_argument('--use_surrogate_archive', type=lambda x: bool(strtobool(x)), default=False, help="Use a surrogate archive at a higher resolution to get a better gradient signal for DQD")
-    parser.add_argument('--sigma0', type=float, default=1.0, help='Initial standard deviation parameter for the covariance matrix used in NES methods')
+    parser.add_argument('--save_heatmaps', type=lambda x: bool(strtobool(x)), default=True,
+                        help='Save the archive heatmaps. Only applies to archives with <= 2 measures')
+    parser.add_argument('--use_surrogate_archive', type=lambda x: bool(strtobool(x)), default=False,
+                        help="Use a surrogate archive at a higher resolution to get a better gradient signal for DQD")
+    parser.add_argument('--sigma0', type=float, default=1.0,
+                        help='Initial standard deviation parameter for the covariance matrix used in NES methods')
     parser.add_argument('--restart_rule', type=str, choices=['basic', 'no_improvement'])
-    parser.add_argument('--calc_gradient_iters', type=int, help='Number of iters to run PPO when estimating the objective-measure gradients (N1)')
-    parser.add_argument('--move_mean_iters', type=int, help='Number of iterations to run PPO when moving the mean solution point (N2)')
+    parser.add_argument('--calc_gradient_iters', type=int,
+                        help='Number of iters to run PPO when estimating the objective-measure gradients (N1)')
+    parser.add_argument('--move_mean_iters', type=int,
+                        help='Number of iterations to run PPO when moving the mean solution point (N2)')
     parser.add_argument('--archive_lr', type=float, help='Archive learning rate for MAEGA')
-    parser.add_argument('--threshold_min', type=float, default=0.0, help='Min objective threshold for adding new solutions to the archive')
-    parser.add_argument('--take_archive_snapshots', type=lambda x: bool(strtobool(x)), default=False, help='Log the objective scores in every cell in the archive every log_freq iterations. Useful for pretty visualizations')
-    parser.add_argument('--adaptive_stddev', type=lambda x: bool(strtobool(x)), default=True, help='If False, the log stddev parameter in the actor will be reset on each QD iteration. Can potentially help exploration but may lose performance')
+    parser.add_argument('--threshold_min', type=float, default=0.0,
+                        help='Min objective threshold for adding new solutions to the archive')
+    parser.add_argument('--take_archive_snapshots', type=lambda x: bool(strtobool(x)), default=False,
+                        help='Log the objective scores in every cell in the archive every log_freq iterations. Useful for pretty visualizations')
+    parser.add_argument('--adaptive_stddev', type=lambda x: bool(strtobool(x)), default=True,
+                        help='If False, the log stddev parameter in the actor will be reset on each QD iteration. Can potentially help exploration but may lose performance')
 
     args = parser.parse_args()
     cfg = AttrDict(vars(args))
@@ -148,7 +167,7 @@ def create_scheduler(cfg: AttrDict,
     # threshold for adding solutions to the archive
     threshold_min = -np.inf
 
-    ctrl_cost_upper_bound = np.sum(np.square(np.ones(action_dim,))) * 0.1
+    ctrl_cost_upper_bound = np.sum(np.square(np.ones(action_dim, ))) * 0.1
 
     bounds = [(0.0, 1.0)] * cfg.num_dims
     bounds[-1] = (0.0, ctrl_cost_upper_bound)  # last measure is ctrl-cost
@@ -319,7 +338,8 @@ def train_ppga(cfg: AttrDict, vec_env):
     for itr in range(starting_iter, itrs + 1):
         # Current solution point. returns a single sol per emitter
         solution_batch = scheduler.ask_dqd()
-        mean_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(solution_batch.flatten()).to(device)
+        mean_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(
+            solution_batch.flatten()).to(device)
         # whether to reset the stddev param for the action distribution
         if not cfg.adaptive_stddev:
             mean_agent.actor_logstd = torch.nn.Parameter(torch.zeros(1, np.prod(cfg.action_shape)))
@@ -349,7 +369,9 @@ def train_ppga(cfg: AttrDict, vec_env):
 
         # using grads from previous step, sample a batch of branched solution points and evaluate their f and m
         branched_sols = scheduler.ask()
-        branched_agents = [Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(sol).to(device) for sol in branched_sols]
+        branched_agents = [
+            Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(sol).to(device) for sol
+            in branched_sols]
         for agent in branched_agents:
             agent.actor_logstd.data = mean_agent.actor_logstd.data
         ppo.agents = branched_agents
@@ -377,7 +399,8 @@ def train_ppga(cfg: AttrDict, vec_env):
         if restarted:
             log.debug("Emitter restarted. Changing the mean agent...")
             mean_soln_point = scheduler.emitters[0].theta
-            mean_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(mean_soln_point).to(device)
+            mean_agent = Actor(obs_shape, action_shape, cfg.normalize_obs, cfg.normalize_returns).deserialize(
+                mean_soln_point).to(device)
 
             # load the obs/return normalizer used for this agent
             if cfg.normalize_obs:
@@ -448,7 +471,8 @@ def train_ppga(cfg: AttrDict, vec_env):
                         result_archive.stats.obj_max, result_archive.stats.obj_mean]
                 writer.writerow(data)
 
-        if (itr > 0 and itr % log_freq == 0 and cfg.take_archive_snapshots) or (final_itr and cfg.take_archive_snapshots):
+        if (itr > 0 and itr % log_freq == 0 and cfg.take_archive_snapshots) or (
+                final_itr and cfg.take_archive_snapshots):
             with open(archive_snapshot_filename, 'a') as archive_snapshot_file:
                 writer = csv.writer(archive_snapshot_file)
                 num_cells = np.prod(scheduler.result_archive.dims)
@@ -497,9 +521,14 @@ if __name__ == '__main__':
                      wandb_project=cfg.wandb_project, wandb_group=cfg.wandb_group, cfg=cfg)
     outdir = os.path.join(cfg.expdir, str(cfg.seed))
     cfg.outdir = outdir
-    assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None or cfg.load_archive_from_cp is not None,\
+    assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None or cfg.load_archive_from_cp is not None, \
         f"Warning: experiment dir {outdir} exists. Danger of overwriting previous run"
     if not os.path.exists(outdir):
         os.makedirs(outdir)
+
+    if not cfg.save_scheduler:
+        log.warning('Warning. You have set save scheduler to false. Only the archive dataframe will be saved in each '
+                    'checkpoint. If you plan to restart this experiment from a checkpoint or wish to have the added '
+                    'safety of recovering from a potential crash, it is recommended that you enable save_scheduler.')
 
     train_ppga(cfg, vec_env)

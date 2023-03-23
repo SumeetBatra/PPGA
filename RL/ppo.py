@@ -432,9 +432,6 @@ class PPO:
                         "train/value_loss": v_loss.item(),
                         "train/policy_loss": pg_loss.item(),
 
-                        "train/obs_running_std": self.vec_inference.obs_normalizers[0].obs_rms.var.sqrt().mean().item(),
-                        "train/obs_running_mean": self.vec_inference.obs_normalizers[0].obs_rms.mean.mean().item(),
-
                         "train/value": self.values.mean().item(),
 
                         "train/adv_mean": advantages.mean().item(),
@@ -471,6 +468,13 @@ class PPO:
                             "Env step": global_step,
                             "global_step": global_step,
                             "Update": update
+                        })
+
+                    if self.cfg.normalize_obs:
+                        wandb.log({
+                            "train/obs_running_std": self.vec_inference.obs_normalizers[
+                                0].obs_rms.var.sqrt().mean().item(),
+                            "train/obs_running_mean": self.vec_inference.obs_normalizers[0].obs_rms.mean.mean().item(),
                         })
 
         train_elapse = time.time() - train_start
