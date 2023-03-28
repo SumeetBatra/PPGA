@@ -134,7 +134,7 @@ class PPO:
 
     @theta.setter
     def theta(self, new_theta):
-        self._theta = new_theta
+        self._theta = np.copy(new_theta)
 
     def update_critics(self, critics_list: List[Critic]):
         self.qd_critic = QDCritic(self.obs_shape, measure_dim=self.cfg.num_dims, critics_list=critics_list).to(
@@ -294,7 +294,6 @@ class PPO:
             self.next_obs = self.vec_inference.vec_normalize_obs(self.next_obs)
 
         if calculate_dqd_gradients:
-            # TODO: make this work for multiple emitters
             solution_params = self._agents[0].serialize()
             original_obs_normalizer = None
             if self.cfg.normalize_obs:
@@ -498,8 +497,7 @@ class PPO:
             new_params = np.array([agent.serialize() for agent in trained_agents])
             jacobian = (new_params - agent_original_params).reshape(self.cfg.num_emitters, self.cfg.num_dims + 1, -1)
 
-            # TODO: make this work for multiple emitters
-            original_agent = [Actor(self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns).deserialize(solution_params).to(
+            original_agent = [Actor(self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns).deserialize(agent_original_params[0]).to(
                 self.device)]
             self.vec_inference = VectorizedActor(original_agent, Actor, self.obs_shape, self.action_shape, self.cfg.normalize_obs, self.cfg.normalize_returns)
             f, m, metadata = self.evaluate(self.vec_inference,
