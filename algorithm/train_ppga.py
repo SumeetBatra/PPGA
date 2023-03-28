@@ -167,10 +167,7 @@ def create_scheduler(cfg: AttrDict,
     # threshold for adding solutions to the archive
     threshold_min = -np.inf
 
-    ctrl_cost_upper_bound = np.sum(np.square(np.ones(action_dim, ))) * 0.1
-
     bounds = [(0.0, 1.0)] * cfg.num_dims
-    bounds[-1] = (0.0, ctrl_cost_upper_bound)  # last measure is ctrl-cost
     archive_dims = [cfg.grid_size] * cfg.num_dims
 
     if cfg.dqd_algorithm == 'cma_maega':
