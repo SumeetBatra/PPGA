@@ -66,6 +66,19 @@ class ObsNormalizer(nn.Module):
         self.obs_rms.update(obs)
         return (obs - self.obs_rms.mean) / torch.sqrt(self.obs_rms.var + self.epsilon)
 
+    def load_stats_dict(self, stats_dict):
+        self.obs_rms.mean = stats_dict['mean']
+        self.obs_rms.var = stats_dict['var']
+        self.obs_rms.count = stats_dict['count']
+
+    def stats_dict(self):
+        obs_norm_stats = {
+            'mean': self.obs_rms.mean,
+            'var': self.obs_rms.var,
+            'count': self.obs_rms.count
+        }
+        return obs_norm_stats
+
 
 class ReturnNormalizer(nn.Module):
     r"""This wrapper will normalize immediate rewards s.t. their exponential moving average has a fixed variance.
@@ -91,7 +104,20 @@ class ReturnNormalizer(nn.Module):
         returns = returns.to(self.return_rms.var.device)
         self.return_rms.update(returns)
         return torch.clamp((returns - self.return_rms.mean) / torch.sqrt(self.return_rms.var + self.epsilon), -5.0, 5.0)
-    
+
+    def load_stats_dict(self, stats_dict):
+        self.return_rms.mean = stats_dict['mean']
+        self.return_rms.var = stats_dict['var']
+        self.return_rms.count = stats_dict['count']
+
+    def stats_dict(self):
+        return_norm_stats = {
+            'mean': self.return_rms.mean,
+            'var': self.return_rms.var,
+            'count': self.return_rms.count
+        }
+        return return_norm_stats
+
 
 class VecRewardNormalizer(nn.Module):
     def __init__(self, num_envs, num_models, reward_dim=1, gamma: float = 0.99, epsilon: float = 1e-8, means=None, vars=None):
