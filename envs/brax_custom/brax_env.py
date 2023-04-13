@@ -11,19 +11,21 @@ v = torch.ones(1, device='cuda')  # init torch cuda before jax
 
 _to_custom_env = {
     'ant': {'custom_env_name': 'brax_custom-ant-v0',
-            'action_clip': (-1, 1),
-            'reward_clip': (-10, 10),
-            'obs_clip': (-10, 10)},
+            'kwargs': {
+                'clip_actions': (-1, 1),
+            }},
     'humanoid': {'custom_env_name': 'brax_custom-humanoid-v0',
-                 'action_clip': (-1, 1),
-                 'reward_clip': (-10, 10),
-                 'obs_clip': (-10, 10)},
+                 'kwargs': {
+                     'clip_actions': (-1, 1),
+                 }},
     'walker2d': {'custom_env_name': 'brax-custom-walker2d-v0',
-                 'action_clip': (-1, 1),
-                 'reward_clip': (-10, 10),
-                 'obs_clip': (-10, 10)},
+                 'kwargs': {
+                     'clip_actions': (-1, 1),
+                 }},
     'halfcheetah': {'custom_env_name': 'brax-custom-halfcheetah-v0',
-                    'action_clip': (-1, 1)}
+                    'kwargs': {
+                        'clip_actions': (-1, 1),
+                    }},
 }
 
 
@@ -33,9 +35,9 @@ def make_vec_env_brax(cfg):
     if brax_env_name not in gym.envs.registry.env_specs:
         gym.register(brax_env_name, entry_point=entry_point)
 
-    act_bounds = _to_custom_env[cfg.env_name]['action_clip']
+    kwargs = _to_custom_env[cfg.env_name]['kwargs']
     vec_env = gym.make(_to_custom_env[cfg.env_name]['custom_env_name'], batch_size=cfg.env_batch_size, seed=cfg.seed,
-                       clip_actions=act_bounds)
+                       **kwargs)
     vec_env = to_torch.JaxToTorchWrapper(vec_env, device='cuda')
 
     return vec_env
