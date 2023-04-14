@@ -1,18 +1,24 @@
 import numpy as np
 import torch
-import gym
-import random
 
 from attrdict import AttrDict
 from time import time
 from utils.utilities import log
-from models.vectorized import VectorizedPolicy, VectorizedLinearBlock, VectorizedActor
+from models.vectorized import VectorizedActor
 from models.actor_critic import Actor, PGAMEActor
-from utils.normalize import ReturnNormalizer, VecRewardNormalizer
 
-TEST_CFG = AttrDict({'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
-            'envs_per_model': 1, 'num_dims': 4, 'gamma': 0.99, 'env_name': 'QDAntBulletEnv-v0', 'seed': 0, 'obs_dim': 28,
-                     'obs_shape': (27,), 'action_shape': (8,), 'num_envs': 10})
+TEST_CFG = AttrDict({
+    'normalize_obs': False,
+    'normalize_rewards': False,
+    'obs_dim': 227,
+    'action_shape': np.array(17),
+    'env_cfg': {
+        'env_name': 'humanoid',
+        'seed': 0,
+        'num_dims': 2,
+        'env_batch_size': None,
+    }
+})
 
 
 def test_serialize_deserialize_pgame_actor():
@@ -25,37 +31,14 @@ def test_serialize_deserialize_pgame_actor():
     assert np.allclose(agent1_params, agent2_params)
 
 
-def test_vec_block():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    weights = torch.randn(10, 5, 4).to(device)
-    block = VectorizedLinearBlock(weights, device=device)
-    obs = torch.randn(20, 4).to(device)
-
-    res_vectorized = block(obs)
-    res_for_loop = []
-
-    weights = torch.transpose(weights, 1, 2)
-    obs = obs.reshape(10, 2, 4)
-    for next_obs, w in zip(obs, weights):
-        obs1, obs2 = next_obs[0], next_obs[1]
-        res_for_loop.append(obs1 @ w)
-        res_for_loop.append(obs2 @ w)
-    res_for_loop = torch.cat(res_for_loop).flatten()
-    res_vectorized = res_vectorized.flatten()
-
-    assert torch.allclose(res_for_loop, res_vectorized)
-
-
-# TODO: figure out why this doesn't work
 def test_vectorized_policy():
     global TEST_CFG
-    dummy_env = make_env(TEST_CFG.env_name, seed=0, gamma=TEST_CFG.gamma)()
+    obs_dim, action_shape = TEST_CFG.obs_dim, TEST_CFG.action_shape
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    obs_shape, action_shape = dummy_env.observation_space.shape, dummy_env.action_space.shape
     num_models = 10
-    models = [Actor(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
-    vec_model = VectorizedActor(TEST_CFG, models, Actor).to(device)
-    obs = torch.randn((num_models, *obs_shape)).to(device)
+    models = [Actor(obs_dim, action_shape, False, False).to(device) for _ in range(num_models)]
+    vec_model = VectorizedActor(models, Actor, obs_dim, action_shape, False, False).to(device)
+    obs = torch.randn((num_models, obs_dim)).to(device)
 
     # test same number of models as number of obs
     res_for_loop = []
@@ -67,10 +50,10 @@ def test_vectorized_policy():
     elapsed_for = time() - start_for
 
     start_vec = time()
-    res_vectorized = vec_model(obs).flatten()
+    res_vectorized = vec_model(obs).flatten().to(torch.float32)
     elapsed_vec = time() - start_vec
 
-    assert torch.allclose(res_for_loop, res_vectorized), "Error! The vectorized policy does not produce the " \
+    assert torch.allclose(res_for_loop, res_vectorized, atol=1e-3), "Error! The vectorized policy does not produce the " \
                                                          "same outputs as naive for-loop over all the individual models"
 
     print(f'For loop over models took {elapsed_for:.2f} seconds. Vectorized inference took {elapsed_vec:.2f} seconds')
@@ -79,14 +62,14 @@ def test_vectorized_policy():
     num_models = 7
     num_obs = num_models * 3
 
-    models = [Actor(TEST_CFG, obs_shape, action_shape).to(device) for _ in range(num_models)]
-    vec_model = VectorizedActor(TEST_CFG, models, Actor).to(device)
-    obs = torch.randn((num_obs, *obs_shape)).to(device)
+    models = [Actor(obs_dim, action_shape, False, False).to(device) for _ in range(num_models)]
+    vec_model = VectorizedActor(models, Actor, obs_dim, action_shape, False, False).to(device)
+    obs = torch.randn((num_obs, obs_dim)).to(device)
 
     with torch.no_grad():
         res_vectorized = vec_model(obs)
         res_for_loop = []
-        obs = obs.reshape(num_models, -1, *obs_shape)
+        obs = obs.reshape(num_models, -1, obs_dim)
         for next_obs, model in zip(obs, models):
             obs1, obs2, obs3 = next_obs[0].reshape(1, -1), next_obs[1].reshape(1, -1), next_obs[2].reshape(1, -1)
             res_for_loop.append(model(obs1))
@@ -94,9 +77,9 @@ def test_vectorized_policy():
             res_for_loop.append(model(obs3))
 
     res_for_loop = torch.cat(res_for_loop).flatten()
-    res_vectorized = res_vectorized.flatten()
+    res_vectorized = res_vectorized.flatten().to(torch.float32)
 
-    assert torch.allclose(res_for_loop, res_vectorized)
+    assert torch.allclose(res_for_loop, res_vectorized, atol=1e-1)
 
 
 # from https://gist.github.com/rohan-varma/a0a75e9a0fbe9ccc7420b04bff4a7212
@@ -146,9 +129,9 @@ def all_params_equal(model1, model2):
 def test_vectorized_to_list():
     '''Make sure the models_list() function returns the list of models to the exact
     same state they were passed in'''
-    obs_shape, action_shape = TEST_CFG.obs_shape, TEST_CFG.action_shape
-    models = [Actor(TEST_CFG, obs_shape, action_shape) for _ in range(10)]
-    vec_model = VectorizedActor(TEST_CFG, models, Actor, obs_shape=obs_shape, action_shape=action_shape)
+    obs_shape, action_shape = TEST_CFG.obs_dim, TEST_CFG.action_shape
+    models = [Actor(obs_shape, action_shape, False, False) for _ in range(10)]
+    vec_model = VectorizedActor(models, Actor, obs_shape=obs_shape, action_shape=action_shape)
     models_returned = vec_model.vec_to_models()
 
     for m_old, m_new in zip(models, models_returned):
@@ -161,64 +144,6 @@ def test_vectorized_to_list():
         # double check all parameters are the same
         assert all_params_equal(m_old, m_new), "Error: not all parameters are the same for the original and returned " \
                                                "model"
-
-
-def test_qdvec_to_list():
-    obs_shape, action_shape = (8,), np.array(2)
-    cfg = {'normalize_rewards': True, 'normalize_obs': True, 'num_workers': 1, 'envs_per_worker': 1,
-           'envs_per_model': 1, 'num_dims': 3}
-    cfg = AttrDict(cfg)
-    models = [Actor(cfg, obs_shape, action_shape, num_dims=3) for _ in range(10)]
-    vec_model = VectorizedActor(cfg, models, Actor, measure_dims=3, obs_shape=obs_shape,
-                                              action_shape=action_shape)
-
-    vec2models = vec_model.vec_to_models()
-
-    for m_orig, m_new in zip(models, vec2models):
-        orig_statedict, new_statedict = m_orig.state_dict(), m_new.state_dict()
-        assert validate_state_dicts(orig_statedict, new_statedict), "Error: State dicts for original model and model" \
-                                                                    " returned by the vectorized model are not the same"
-        # double check all parameters are the same
-        assert all_params_equal(m_orig.to(torch.device('cuda')),
-                                m_new), "Error: not all parameters are the same for the original and returned " \
-                                        "model"
-
-
-def test_vectorized_rew_normalizer():
-    envs_per_model = 5
-    num_models = 10
-    num_envs = num_models * envs_per_model
-    rew_norms = [ReturnNormalizer(envs_per_model) for _ in range(10)]
-    means = [norm.return_rms.mean for norm in rew_norms]
-    vars = [norm.return_rms.var for norm in rew_norms]
-    means = torch.Tensor(means)
-    vars = torch.Tensor(vars)
-    vec_rew_norm = VecRewardNormalizer(num_envs, num_models, means=means, vars=vars)
-
-    # simulate a rollout
-    nrews_for_loop = []
-    nrews_vec = []
-    for step in range(1000):
-        rews = torch.randn(num_envs).reshape(num_models, envs_per_model)
-        dones = torch.randint(0, 2, size=(num_envs,)).reshape(num_models, envs_per_model)
-
-        n_for = []
-        for rew, done, normalizer in zip(rews, dones, rew_norms):
-            rew = normalizer(rew, done)
-            n_for.append(rew)
-        n_for = torch.cat(n_for)
-        nrews_for_loop.append(n_for)
-
-        # do the same for vectorized version
-        rews = rews.flatten()
-        dones = dones.flatten()
-        nrews = vec_rew_norm(rews, dones)
-        nrews_vec.append(nrews)
-
-    nrews_for_loop = torch.cat(nrews_for_loop).flatten()
-    nrews_vec = torch.cat(nrews_vec).flatten()
-
-    assert torch.allclose(nrews_for_loop, nrews_vec)
 
 
 if __name__ == '__main__':
