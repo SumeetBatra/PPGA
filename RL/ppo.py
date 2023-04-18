@@ -564,11 +564,11 @@ class PPO:
 
         if self.cfg.normalize_obs:
             for i, data in enumerate(metadata):
-                data['obs_normalizer'] = obs_normalizer.state_dict()
+                data['obs_normalizer'] = copy.deepcopy(obs_normalizer.state_dict())
 
         if self.cfg.normalize_returns:
             for i, data in enumerate(metadata):
-                data['return_normalizer'] = return_normalizer.state_dict()
+                data['return_normalizer'] = copy.deepcopy(return_normalizer.state_dict())
 
         if verbose:
             np.set_printoptions(suppress=True)
