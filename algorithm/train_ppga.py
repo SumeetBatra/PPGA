@@ -78,6 +78,7 @@ def parse_args():
     parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False,
                         help='Use bootstrap value estimates')
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
+    parser.add_argument('--clip_obs_rew', type=lambda x: bool(strtobool(x)), default=False, help='Clip obs and rewards b/w -10 and 10')
 
     # QD Params
     parser.add_argument("--num_emitters", type=int, default=1, help="Number of parallel"

@@ -61,7 +61,7 @@ def parse_args():
     parser.add_argument("--target_kl", type=float, default=None,
                         help="the target KL divergence threshold")
     parser.add_argument('--normalize_obs', type=lambda x: bool(strtobool(x)), default=False, help='Normalize observations across a batch using running mean and stddev')
-    parser.add_argument('--normalize_rewards', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
+    parser.add_argument('--normalize_returns', type=lambda x: bool(strtobool(x)), default=False, help='Normalize rewards across a batch using running mean and stddev')
     parser.add_argument('--value_bootstrap', type=lambda x: bool(strtobool(x)), default=False, help='Use bootstrap value estimates')
 
     parser.add_argument('--weight_decay', type=float, default=None, help='Apply L2 weight regularization to the NNs')
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     if cfg.use_wandb:
         config_wandb(cfg=cfg, batch_size=cfg.batch_size, total_steps=cfg.total_timesteps, run_name=cfg.wandb_run_name, wandb_group=cfg.wandb_group, wandb_project=cfg.wandb_project)
 
-    alg = PPO(cfg.seed, cfg, vec_env)
+    alg = PPO(cfg)
     num_updates = cfg.total_timesteps // cfg.batch_size
-    alg.train(num_updates, rollout_length=cfg.rollout_length)
+    alg.train(vec_env, num_updates, rollout_length=cfg.rollout_length)
     sys.exit(0)
