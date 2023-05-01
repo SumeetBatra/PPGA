@@ -2,7 +2,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH -N1
 #SBATCH -n1
-#SBATCH -c4
+#SBATCH -c8
 #SBATCH --output=tmp/ppga_ant_%j.log
 
 ENV_NAME="ant"
@@ -10,13 +10,13 @@ GRID_SIZE=10  # number of cells per archive dimension
 SEED=1111
 
 
-RUN_NAME="paper_qdppo_"$ENV_NAME"_seed_"$SEED"_v2"
+RUN_NAME="paper_ppga_"$ENV_NAME"_seed_"$SEED"_v2"
 echo $RUN_NAME
 srun python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --rollout_length=128 \
                                      --use_wandb=True \
                                      --seed=$SEED \
-                                     --wandb_group=paper \
+                                     --wandb_group=paper_v2 \
                                      --num_dims=4 \
                                      --num_minibatches=8 \
                                      --update_epochs=4 \

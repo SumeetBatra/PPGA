@@ -4,13 +4,12 @@ import pickle
 
 import matplotlib.pyplot as plt
 import glob
-import scienceplots
-import csv
 import pandas as pd
 import os
 import numpy as np
 import copy
 
+from pathlib import Path
 from collections import OrderedDict
 from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
 from attrdict import AttrDict
@@ -78,16 +77,16 @@ shared_params = OrderedDict({
 })
 
 PGAME_DIRS = AttrDict({
-    'walker2d': f'/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/',
-    'halfcheetah': f'/home/sumeet/QDax/experiments/pga_me_halfcheetah_uni_baseline/',
-    'humanoid': f'/home/sumeet/QDax/experiments/pga_me_humanoid_uni_baseline/',
-    # 'ant': '/home/sumeet/QDax/experiments/pga_me_ant_uni_baseline/'
+    'walker2d': f'{Path.home()}/QDax/experiments/pga_me_walker2d_uni_baseline/',
+    'halfcheetah': f'{Path.home()}/QDax/experiments/pga_me_halfcheetah_uni_baseline/',
+    'humanoid': f'{Path.home()}QDax/experiments/pga_me_humanoid_uni_baseline/',
+    'ant': f'{Path.home()}/QDax/experiments/pga_me_ant_uni_baseline/'
 })
 
 PPGA_DIRS = AttrDict({
-    'walker2d': './experiments/paper_qdppo_walker2d',
-    'halfcheetah': './experiments/paper_qdppo_halfcheetah',
-    'humanoid': './experiments/paper_qdppo_humanoid'
+    'walker2d': './experiments/paper_ppga_walker2d',
+    'halfcheetah': './experiments/paper_ppga_halfcheetah',
+    'humanoid': './experiments/paper_ppga_humanoid'
 })
 
 
@@ -268,7 +267,7 @@ def get_pgame_df(exp_dir, reevaluated_archive=False, save=False):
     return dataframes
 
 
-def get_qdppo_df(exp_dir, reevaluated_archive=False):
+def get_ppga_df(exp_dir, reevaluated_archive=False):
     seeds = [1111, 2222, 3333, 4444]
     dataframes = []
     for seed in seeds:
@@ -294,14 +293,14 @@ def plot_cdf_data(reevaluated_archives=False, axs=None):
     prefix = 'Corrected ' if reevaluated_archives else ''
     title = prefix + subtitle
 
-    for i, ((exp_name, qdppo_dir), (_, pgame_dir)) in enumerate(zip(PPGA_DIRS.items(), PGAME_DIRS.items())):
+    for i, ((exp_name, ppga_dir), (_, pgame_dir)) in enumerate(zip(PPGA_DIRS.items(), PGAME_DIRS.items())):
         base_cfg = AttrDict(shared_params[exp_name])
         base_cfg['title'] = exp_name
 
-        qdppo_cfg = copy.copy(base_cfg)
-        qdppo_cfg.update({'archive_dir': qdppo_dir, 'algorithm': 'QDPPO'})
-        qdppo_dataframes = get_qdppo_df(qdppo_dir, reevaluated_archive=reevaluated_archives)
-        qdppo_cdf = compile_cdf(qdppo_cfg, dataframes=qdppo_dataframes)
+        ppga_cfg = copy.copy(base_cfg)
+        ppga_cfg.update({'archive_dir': ppga_dir, 'algorithm': 'PPGA'})
+        ppga_dataframes = get_ppga_df(ppga_dir, reevaluated_archive=reevaluated_archives)
+        ppga_cdf = compile_cdf(ppga_cfg, dataframes=ppga_dataframes)
 
         pgame_cfg = copy.copy(base_cfg)
         pgame_cfg.update({'archive_dir': pgame_dir, 'algorithm': 'PGA-ME'})
@@ -310,11 +309,11 @@ def plot_cdf_data(reevaluated_archives=False, axs=None):
 
         if standalone_plot:
             (j, k) = np.unravel_index(i, (2, 2))
-            make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[j][k])
+            make_cdf_plot(ppga_cfg, ppga_cdf, axs[j][k])
             make_cdf_plot(pgame_cfg, pgame_cdf, axs[j][k])
         else:
             env_idx = index_of(exp_name)
-            make_cdf_plot(qdppo_cfg, qdppo_cdf, axs[3][env_idx])
+            make_cdf_plot(ppga_cfg, ppga_cdf, axs[3][env_idx])
             make_cdf_plot(pgame_cfg, pgame_cdf, axs[3][env_idx])
 
 
@@ -452,9 +451,4 @@ def print_corrected_qd_metrics():
 
 if __name__ == '__main__':
     args = parse_args()
-    # plot_qd_results(args)
     plot_all_results()
-    # get_qdppo_df('/home/sumeet/QDPPO/experiments/paper_qdppo_walker2d')
-    # plot_cdf_data(reevaluated_archives=True)
-    # visualize_reevaluated_archives()
-    # print_corrected_qd_metrics()

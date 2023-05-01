@@ -5,7 +5,7 @@ GRID_SIZE=50  # number of cells per archive dimension
 SEED=1111
 
 
-RUN_NAME="paper_ppga_"$ENV_NAME"_seed_"$SEED"_adaptive_stddev"
+RUN_NAME="paper_ppga_"$ENV_NAME"_seed_"$SEED
 echo $RUN_NAME
 python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --rollout_length=128 \
@@ -18,6 +18,7 @@ python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --update_epochs=4 \
                                 --normalize_obs=True \
                                 --normalize_returns=True \
+                                --adaptive_stddev=False \
                                 --wandb_run_name=$RUN_NAME\
                                 --popsize=300 \
                                 --env_batch_size=3000 \
@@ -35,4 +36,4 @@ python -m algorithm.train_qdppo --env_name=$ENV_NAME \
                                 --archive_lr=0.5 \
                                 --threshold_min=200 \
                                 --grid_size=$GRID_SIZE \
-                                --expdir=./experiments/paper_ppga_"$ENV_NAME"_adaptive_stddev
+                                --expdir=./experiments/paper_ppga_"$ENV_NAME"

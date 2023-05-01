@@ -5,7 +5,7 @@ GRID_SIZE=10  # number of cells per archive dimension
 SEED=1111
 
 
-RUN_NAME="paper_qdppo_"$ENV_NAME"_seed_"$SEED"_v2"
+RUN_NAME="paper_ppga_"$ENV_NAME"_seed_"$SEED
 echo $RUN_NAME
 python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --rollout_length=128 \
@@ -33,4 +33,4 @@ python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --sigma0=3.0 \
                                      --threshold_min=-500 \
                                      --grid_size=$GRID_SIZE \
-                                     --expdir=./experiments/paper_ppga_"$ENV_NAME"_v2
+                                     --expdir=./experiments/paper_ppga_"$ENV_NAME"
