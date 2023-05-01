@@ -88,3 +88,13 @@ python3 -m algorithm.train_ppga --help
 ## Evaluating an Archive 
 See the jupyter notebook `algorithm/enjoy_ppga.ipynb` for instructions and examples on how to visualize results! 
 
+## Pretrained Archives 
+TODO 
+
+## Results 
+| **Environment** | **QD-Score** | **Coverage**       | **Best Reward** | **Experiment Command** |
+|-----------------|--------------|--------------------|-----------------|------------------------|
+| Humanoid        | 9678         | $7.01 \times 10^6$ |                 |                        |
+| Walker2D        | 12240        |                    |                 |                        |
+| HalfCheetah     | 11031        |                    |                 |                        |
+| Ant             | 11000        |                    |                 |                        |
