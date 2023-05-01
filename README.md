@@ -92,9 +92,9 @@ See the jupyter notebook `algorithm/enjoy_ppga.ipynb` for instructions and examp
 TODO 
 
 ## Results 
-| **Environment** | **QD-Score** | **Coverage**       | **Best Reward** | **Experiment Command** |
-|-----------------|--------------|--------------------|-----------------|------------------------|
-| Humanoid        | 9678         | $7.01 \times 10^6$ |                 |                        |
-| Walker2D        | 12240        |                    |                 |                        |
-| HalfCheetah     | 11031        |                    |                 |                        |
-| Ant             | 11000        |                    |                 |                        |
+| **Environment** | **QD-Score**       | **Coverage** | **Best Reward** | **Experiment Command**                      |
+|-----------------|--------------------|--------------|-----------------|---------------------------------------------|
+| Humanoid        | $7.01 \times 10^6$ | 70.0%        | 9755            | `./runners/local/train_ppga_humanoid.sh`    |
+| Walker2D        | $5.82 \times 10^6$ | 67.8%        | 4796            | `./runners/local/train_ppga_walker2d.sh`    |
+| HalfCheetah     | $2.94 \times 10^7$ | 98.4%        | 9335            | `./runners/local/train_ppga_halfcheetah.sh` |
+| Ant             | $2.26 \times 10^7$ | 53.1%        | 7854            | `./runners/local/train_ppga_ant.sh`         |
