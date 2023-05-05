@@ -1,8 +1,11 @@
 import argparse
 import json
 import pickle
+import wandb
 
 import matplotlib.pyplot as plt
+import scienceplots
+import seaborn as sns
 import glob
 import pandas as pd
 import os
@@ -11,11 +14,13 @@ import copy
 
 from pathlib import Path
 from collections import OrderedDict
-from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
+# from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
 
 plt.style.use('science')
+
+api = wandb.Api()
 
 shared_params = OrderedDict({
     'walker2d':
@@ -449,6 +454,44 @@ def print_corrected_qd_metrics():
         print(f'PGA-ME {exp_name}: Averaged Results: {data}')
 
 
+def get_hyperparam_gridsearch_results():
+    '''Plot the results from the N1, N2 gridsearch experiments'''
+    sns.set(rc={'figure.figsize': (8, 6)})
+    sns.set_style(style='white')
+    runs = api.runs('qdrl/QDPPO', filters={
+        "$and": [{"tags": "PPGA"}, {"tags": "humanoid"}]
+        })
+    hist_list = []
+    for run in runs:
+        if 'gradsteps' in run.name or 'walksteps' in run.name or 'v2_clipped_nonadaptive' in run.name:
+            # this takes a long time
+            hist = pd.DataFrame(run.scan_history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']))
+            # use this for debugging/tweaking the figure
+            # hist = run.history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score'])
+            hist['name'] = f'(N1, N2) = ({run.config["calc_gradient_iters"]}, {run.config["move_mean_iters"]})'
+            hist_list.append(hist)
+
+    df = pd.concat(hist_list, ignore_index=True)
+
+    evals_per_iter = 300  # b/c PPGA branches 300 solutions per QD iteration
+    evals = df['QD/iteration'] * evals_per_iter
+    df['Num Evals'] = evals
+
+
+    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
+    sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=df, ax=axs[0], hue='name')
+    sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=df, ax=axs[1], hue='name')
+    sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=df, ax=axs[2], hue='name')
+    axs[0].set_ylabel('QD Score')
+    axs[1].set_ylabel('Best Reward')
+    axs[2].set_ylabel('Coverage (\%)')
+    for ax in axs:
+        ax.get_legend().remove()
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), borderaxespad=0)
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
     args = parse_args()
-    plot_all_results()
+    get_hyperparam_gridsearch_results()
