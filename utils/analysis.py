@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import pickle
 import wandb
 
@@ -14,7 +15,8 @@ import copy
 
 from pathlib import Path
 from collections import OrderedDict
-# from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
+from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, \
+    reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
 
@@ -176,6 +178,65 @@ def plot_all_results():
     plt.show()
 
 
+def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
+    runs = api.runs('qdrl/QDPPO', filters={
+        "$and": [{'tags': algorithm}, {'tags': env_name}]
+    })
+
+    list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)']
+    list2 = ['QDPG', 'PGA-ME']
+
+    keys = []
+    if algorithm in list1:
+        keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']
+    elif algorithm in list2:
+        keys = ['iteration', 'coverage', 'qd_score', 'max_fitness']
+
+    hist_list = []
+    cache_dir = Path('./.cache')
+    cache_dir.mkdir(exist_ok=True)
+    for run in runs:
+        res = all([key in run.name for key in keywords]) and '24hr' not in run.name
+        if res:
+            if algorithm in list1:
+                cached_data_path = cache_dir.joinpath(Path(f'{run.storage_id}.csv'))
+                if cached_data_path.exists():
+                    print(f'Loading cached data for run {run.name}')
+                    hist = pd.read_csv(str(cached_data_path))
+                else:
+                    # this takes a long time
+                    hist = pd.DataFrame(
+                        run.scan_history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']))
+                    # use this for debugging/tweaking the figure
+                    # hist = run.history(keys=keys)
+                    hist.to_csv(str(cached_data_path))
+            else:
+                # for some reason, baselines run from the qdax library can't be one-shot concatenated
+                # so we load dataframes key-by-key and concat together at the end
+                hists = []
+                for key in keys:
+                    cached_data_path = cache_dir.joinpath(Path(f'{run.storage_id}_{key}.csv'))
+                    if cached_data_path.exists():
+                        print(f'Loading cached data for run {run.name} and {key=} from cache')
+                        df = pd.read_csv(str(cached_data_path))
+                    else:
+                        df = pd.DataFrame(run.scan_history(keys=[key]))
+                        df.to_csv(str(cached_data_path))
+                    hists.append(df)
+                    # hists.append(run.history(keys=[key]))
+                hist = pd.concat(hists, axis=1, ignore_index=True)
+                hist = pd.DataFrame(data=hist, columns=[1, 3, 5, 7]).rename(columns={1: 'QD/iteration',
+                                                                              3: 'QD/coverage',
+                                                                              5: 'QD/QD Score',
+                                                                              7: 'QD/best score'})
+            # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
+            hist['name'] = algorithm
+            hist_list.append(hist)
+
+    df = pd.concat(hist_list, ignore_index=True)
+    return df
+
+
 def plot_qd_results(args):
     csv_dir = args['csv_dir']
     algorithm = args['algorithm']
@@ -183,7 +244,6 @@ def plot_qd_results(args):
     x_axis_mult = 1.0
     if 'PGA-ME' in algorithm:
         x_axis_mult = 10.0  # b/c the log freq of pga-me was every 10 qd iters
-
 
     coverage_fp = glob.glob(csv_dir + '/' + '*coverage.csv')[0]
     coverage_data = pd.read_csv(coverage_fp).filter(regex='coverage')
@@ -201,6 +261,7 @@ def plot_qd_results(args):
     x = np.arange(0, len(coverage_data)) * x_axis_mult
 
     axs = args['axes']
+
     # for ax in axs:
     #     ax.set_xlabel('Iteration')
 
@@ -322,7 +383,6 @@ def plot_cdf_data(reevaluated_archives=False, axs=None):
             make_cdf_plot(pgame_cfg, pgame_cdf, axs[3][env_idx])
 
 
-
 def load_and_eval_pgame_archive(exp_name, seed, data_is_saved=False):
     exp_dir = PGAME_DIRS[exp_name]
     cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
@@ -383,7 +443,8 @@ def load_and_eval_ppga_archive(exp_name, seed, data_is_saved=False):
               f'Avg Fitness: {new_archive.stats.obj_mean} \n'
               f'QD Score: {new_archive.offset_qd_score}')
     else:
-        new_archive = reevaluate_ppga_archive(env_cfg, agent_cfg=agent_cfg, original_archive=original_archive, save_path=save_path)
+        new_archive = reevaluate_ppga_archive(env_cfg, agent_cfg=agent_cfg, original_archive=original_archive,
+                                              save_path=save_path)
 
     return original_archive, new_archive
 
@@ -460,12 +521,13 @@ def get_hyperparam_gridsearch_results():
     sns.set_style(style='white')
     runs = api.runs('qdrl/QDPPO', filters={
         "$and": [{"tags": "PPGA"}, {"tags": "humanoid"}]
-        })
+    })
     hist_list = []
     for run in runs:
         if 'gradsteps' in run.name or 'walksteps' in run.name or 'v2_clipped_nonadaptive' in run.name:
             # this takes a long time
-            hist = pd.DataFrame(run.scan_history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']))
+            hist = pd.DataFrame(
+                run.scan_history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']))
             # use this for debugging/tweaking the figure
             # hist = run.history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score'])
             hist['name'] = f'(N1, N2) = ({run.config["calc_gradient_iters"]}, {run.config["move_mean_iters"]})'
@@ -476,7 +538,6 @@ def get_hyperparam_gridsearch_results():
     evals_per_iter = 300  # b/c PPGA branches 300 solutions per QD iteration
     evals = df['QD/iteration'] * evals_per_iter
     df['Num Evals'] = evals
-
 
     fig, axs = plt.subplots(1, 3, figsize=(18, 5))
     sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=df, ax=axs[0], hue='name')
@@ -492,6 +553,50 @@ def get_hyperparam_gridsearch_results():
     plt.show()
 
 
+def plot_qd_results2():
+    algorithms = {
+        'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
+        'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
+        # 'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
+        'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
+        # 'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300}
+    }
+    envs = ['humanoid', 'walker2d', 'halfcheetah', 'ant']
+    fig, axs = plt.subplots(4, 4, figsize=(12, 12))
+    for j, env in enumerate(envs):
+        all_data = []
+        for algorithm in algorithms.keys():
+            df = get_results_dataframe(env, algorithm, keywords=algorithms[algorithm]['keywords'])
+
+            evals = df['QD/iteration'] * algorithms[algorithm]['evals_per_iter']
+            df['Num Evals'] = evals
+            df['env'] = env
+            # If the algorithm crashed/restarted mid-training for some reason,
+            # there are missing entries which make the plots look incorrect that we need to interpolate
+            df.fillna(method='ffill', inplace=True)
+            df = df.sort_values(by=['QD/iteration'])
+
+            all_data.append(df)
+
+        all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['QD/iteration'])
+
+        sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=all_data, ax=axs[0][envs.index(env)],
+                     hue='name')
+        sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[1][envs.index(env)],
+                     hue='name')
+        sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data, ax=axs[2][envs.index(env)],
+                     hue='name')
+        axs[0][j].set_ylabel('Best Reward')
+        axs[1][j].set_ylabel('QD Score')
+        axs[2][j].set_ylabel('Coverage (\%)')
+    # for ax in axs:
+    #     ax.get_legend().remove()
+
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), borderaxespad=0)
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
     args = parse_args()
-    get_hyperparam_gridsearch_results()
+    plot_qd_results2()
