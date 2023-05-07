@@ -5,6 +5,7 @@ import pickle
 import wandb
 
 import matplotlib.pyplot as plt
+import matplotlib.projections as proj
 import scienceplots
 import seaborn as sns
 import glob
@@ -19,6 +20,7 @@ from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoi
     reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
+from utilities import CapturesFillBetween
 
 plt.style.use('science')
 
@@ -188,7 +190,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
 
     keys = []
     if algorithm in list1:
-        keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']
+        keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score__MIN']
     elif algorithm in list2:
         keys = ['iteration', 'coverage', 'qd_score', 'max_fitness']
 
@@ -206,7 +208,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
                 else:
                     # this takes a long time
                     hist = pd.DataFrame(
-                        run.scan_history(keys=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']))
+                        run.scan_history(keys=keys))
                     # use this for debugging/tweaking the figure
                     # hist = run.history(keys=keys)
                     hist.to_csv(str(cached_data_path))
@@ -226,9 +228,9 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
                     # hists.append(run.history(keys=[key]))
                 hist = pd.concat(hists, axis=1, ignore_index=True)
                 hist = pd.DataFrame(data=hist, columns=[1, 3, 5, 7]).rename(columns={1: 'QD/iteration',
-                                                                              3: 'QD/coverage',
-                                                                              5: 'QD/QD Score',
-                                                                              7: 'QD/best score'})
+                                                                                     3: 'QD/coverage',
+                                                                                     5: 'QD/QD Score',
+                                                                                     7: 'QD/best score'})
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
             hist['name'] = algorithm
             hist_list.append(hist)
@@ -557,12 +559,15 @@ def plot_qd_results2():
     algorithms = {
         'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
         'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
-        # 'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
+        'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
         'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
-        # 'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300}
+        'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300}
     }
+    alg_names = list(algorithms.keys())
     envs = ['humanoid', 'walker2d', 'halfcheetah', 'ant']
-    fig, axs = plt.subplots(4, 4, figsize=(12, 12))
+    proj.register_projection(CapturesFillBetween)
+    fig, axs = plt.subplots(4, 4, figsize=(12, 12), subplot_kw=dict(projection='captures_fill_between'))
+
     for j, env in enumerate(envs):
         all_data = []
         for algorithm in algorithms.keys():
@@ -580,12 +585,14 @@ def plot_qd_results2():
 
         all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['QD/iteration'])
 
-        sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=all_data, ax=axs[0][envs.index(env)],
-                     hue='name')
-        sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[1][envs.index(env)],
-                     hue='name')
-        sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data, ax=axs[2][envs.index(env)],
-                     hue='name')
+        ax_best = sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=all_data,
+                               ax=axs[0][envs.index(env)], hue='name', hue_order=alg_names)
+        ax_qd = sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[1][envs.index(env)],
+                             hue='name', hue_order=alg_names)
+        ax_cov = sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data,
+                              ax=axs[2][envs.index(env)], hue='name', hue_order=alg_names)
+
+
         axs[0][j].set_ylabel('Best Reward')
         axs[1][j].set_ylabel('QD Score')
         axs[2][j].set_ylabel('Coverage (\%)')

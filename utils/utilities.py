@@ -1,11 +1,17 @@
 import logging
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas
 import wandb
 import os
 import torch
 import glob
 import json
+import matplotlib.axis as maxis
 from attrdict import AttrDict
 from colorlog import ColoredFormatter
+from matplotlib.pyplot import Axes
 
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
@@ -84,3 +90,33 @@ def save_cfg(dir, cfg):
 def get_checkpoints(checkpoints_dir):
     checkpoints = glob.glob(os.path.join(checkpoints_dir, 'cp_*'))
     return sorted(checkpoints)
+
+
+class CapturesFillBetween(Axes):
+    name = 'captures_fill_between'
+
+    def __init__(self, fig, *args, **kwargs):
+        super().__init__(fig, *args, **kwargs)
+
+    def _init_axis(self):
+        self.y1 = None
+        self.y2 = None
+        self.xaxis = maxis.XAxis(self)
+        self.yaxis = maxis.YAxis(self)
+
+    def fill_between(self, x, y1, y2=0, where=None, interpolate=False,
+                     step=None, **kwargs):
+        if isinstance(y1, pandas.Series):
+            y1 = y1.to_numpy()
+        if isinstance(y2, pandas.Series):
+            y2 = y2.to_numpy()
+        mean = self.lines[0].get_ydata()
+        mean = np.maximum.accumulate(mean)
+        y1 = np.maximum.accumulate(y1)
+        y2 = np.maximum.accumulate(y2)
+        self.lines[0].set_ydata(mean)
+        Axes.fill_between(self, x, y1, y2, where=where, interpolate=interpolate,
+                          step=step, **kwargs)
+
+
+
