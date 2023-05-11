@@ -12,6 +12,7 @@ import matplotlib.axis as maxis
 from attrdict import AttrDict
 from colorlog import ColoredFormatter
 from matplotlib.pyplot import Axes
+from collections import OrderedDict
 
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
@@ -92,8 +93,8 @@ def get_checkpoints(checkpoints_dir):
     return sorted(checkpoints)
 
 
-class CapturesFillBetween(Axes):
-    name = 'captures_fill_between'
+class DataPostProcessor(Axes):
+    name = 'data_post_processor'
 
     def __init__(self, fig, *args, **kwargs):
         super().__init__(fig, *args, **kwargs)
@@ -105,16 +106,22 @@ class CapturesFillBetween(Axes):
         self.yaxis = maxis.YAxis(self)
 
     def fill_between(self, x, y1, y2=0, where=None, interpolate=False,
-                     step=None, **kwargs):
+                     step=None, monotonic=True, **kwargs):
         if isinstance(y1, pandas.Series):
             y1 = y1.to_numpy()
         if isinstance(y2, pandas.Series):
             y2 = y2.to_numpy()
-        mean = self.lines[0].get_ydata()
-        mean = np.maximum.accumulate(mean)
-        y1 = np.maximum.accumulate(y1)
-        y2 = np.maximum.accumulate(y2)
-        self.lines[0].set_ydata(mean)
+        if isinstance(x, pandas.Series):
+            x = x.to_numpy()
+
+        if monotonic:
+            y1 = np.maximum.accumulate(y1)
+            y2 = np.maximum.accumulate(y2)
+            for i in range(len(self.lines)):
+                # this performs unnecessary computations but idk a better way
+                mean = self.lines[i].get_ydata()
+                mean = np.maximum.accumulate(mean)
+                self.lines[i].set_ydata(mean)
         Axes.fill_between(self, x, y1, y2, where=where, interpolate=interpolate,
                           step=step, **kwargs)
 
