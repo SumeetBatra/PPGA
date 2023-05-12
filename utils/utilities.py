@@ -115,6 +115,7 @@ class DataPostProcessor(Axes):
             x = x.to_numpy()
 
         if monotonic:
+            # gets rid of wandb artifacts where what should be monotonic metrics appear non-monotonic
             y1 = np.maximum.accumulate(y1)
             y2 = np.maximum.accumulate(y2)
             for i in range(len(self.lines)):

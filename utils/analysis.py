@@ -21,12 +21,28 @@ from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoi
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
 from utilities import DataPostProcessor
+from collections import OrderedDict
 
 plt.style.use('science')
 
 api = wandb.Api()
 
 shared_params = OrderedDict({
+    'humanoid':
+        {
+            'objective_range': (0, 10000),
+            'objective_resolution': 100,
+            'archive_resolution': 2500,
+            'skip_len': 200,
+            'algorithm_name': 'cma_mae_100_0.01',
+            'env_cfg': {
+                'env_name': 'humanoid',
+                'num_dims': 2,
+                'episode_length': 1000,
+                'grid_size': 50,
+                'clip_obs_rew': False
+            }
+        },
     'walker2d':
         {
             'objective_range': (0, 5000),
@@ -38,7 +54,8 @@ shared_params = OrderedDict({
                 'env_name': 'walker2d',
                 'num_dims': 2,
                 'episode_length': 1000,
-                'grid_size': 50
+                'grid_size': 50,
+                'clip_obs_rew': False
             }
         },
     'halfcheetah':
@@ -52,21 +69,8 @@ shared_params = OrderedDict({
                 'env_name': 'halfcheetah',
                 'num_dims': 2,
                 'episode_length': 1000,
-                'grid_size': 50
-            }
-        },
-    'humanoid':
-        {
-            'objective_range': (0, 10000),
-            'objective_resolution': 100,
-            'archive_resolution': 2500,
-            'skip_len': 200,
-            'algorithm_name': 'cma_mae_100_0.01',
-            'env_cfg': {
-                'env_name': 'humanoid',
-                'num_dims': 2,
-                'episode_length': 1000,
-                'grid_size': 50
+                'grid_size': 50,
+                'clip_obs_rew': False
             }
         },
     'ant':
@@ -81,6 +85,7 @@ shared_params = OrderedDict({
                 'num_dims': 4,
                 'episode_length': 1000,
                 'grid_size': 10,
+                'clip_obs_rew': False
             }
         }
 })
@@ -93,9 +98,9 @@ PGAME_DIRS = AttrDict({
 })
 
 PPGA_DIRS = AttrDict({
-    'humanoid': './experiments/paper_ppga_humanoid_v2',
-    'walker2d': './experiments/paper_ppga_walker2d_v2_clipped',
-    'halfcheetah': './experiments/paper_ppga_halfcheetah_adaptive_stddev_v2',
+    'humanoid': 'experiments/paper_ppga_humanoid_v2_clipped_nonadaptive',
+    # 'walker2d': 'experiments/paper_ppga_walker2d_v2_clipped',
+    # 'halfcheetah': 'experiments/paper_ppga_halfcheetah_adaptive_stddev_v2',
     'ant': 'experiments/paper_ppga_ant_v2'
 })
 
@@ -113,8 +118,19 @@ SEP_CMA_MAE_DIRS = AttrDict({
     'ant': 'experiments/sep_cma_mae_ant_baseline'
 })
 
+CMA_MAEGA_TD3_ES_DIRS = AttrDict({
+    'humanoid': 'experiments/cma_maega_td3_es_humanoid_baseline',
+    'walker2d': 'experiments/cma_maega_td3_es_walker2d_baseline',
+    'halfcheetah': 'experiments/cma_maega_td3_es_halfcheetah_baseline',
+    'ant': 'experiments/cma_maega_td3_es_ant_baseline'
+})
+
 # these are set to match the hue order of seaborn lineplot
-HUES = {'PPGA': 'blue', 'PGA-ME': 'green', 'QDPG': 'orange', 'SEP-CMA-MAE': 'red', 'CMA-MAEGA(TD3, ES)': 'purple'}
+HUES = OrderedDict({'PPGA': 'blue', 'PGA-ME': 'green', 'QDPG': 'orange', 'SEP-CMA-MAE': 'red', 'CMA-MAEGA(TD3, ES)': 'purple'})
+
+list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)']
+list2 = ['QDPG', 'PGA-ME']
+
 
 def index_of(env_name):
     return list(shared_params.keys()).index(env_name)
@@ -168,12 +184,9 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
         "$and": [{'tags': algorithm}, {'tags': env_name}]
     })
 
-    list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)']
-    list2 = ['QDPG', 'PGA-ME']
-
     keys = []
     if algorithm in list1:
-        keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score__MIN']
+        keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']
     elif algorithm in list2:
         keys = ['iteration', 'coverage', 'qd_score', 'max_fitness']
 
@@ -185,7 +198,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
         if res:
             if algorithm in list1:
                 cached_data_path = cache_dir.joinpath(Path(f'{run.storage_id}.csv'))
-                if cached_data_path.exists():
+                if cached_data_path.exists() and algorithm != 'CMA-MAEGA(TD3, ES)':
                     print(f'Loading cached data for run {run.name}')
                     hist = pd.read_csv(str(cached_data_path))
                 else:
@@ -216,6 +229,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
                                                                                      7: 'QD/best score'})
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
             hist['name'] = algorithm
+            hist['color'] = HUES[algorithm]
             hist_list.append(hist)
 
     df = pd.concat(hist_list, ignore_index=True)
@@ -323,8 +337,8 @@ def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reeval
             make_cdf_plot(cfg, algo_cdf, axs[3][env_idx])
 
 
-def load_and_eval_pgame_archive(exp_name, seed, data_is_saved=False):
-    exp_dir = PGAME_DIRS[exp_name]
+def load_and_eval_pgame_archive(exp_name, exp_dirs, seed, data_is_saved=False):
+    exp_dir = exp_dirs[exp_name]
     cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
     save_path = cp_path
     if not os.path.exists(save_path):
@@ -352,8 +366,8 @@ def load_and_eval_pgame_archive(exp_name, seed, data_is_saved=False):
     return original_archive, new_archive
 
 
-def load_and_eval_ppga_archive(exp_name, seed, data_is_saved=False):
-    exp_dir = PPGA_DIRS[exp_name]
+def load_and_eval_ppga_archive(exp_name, exp_dirs, seed, data_is_saved=False):
+    exp_dir = exp_dirs[exp_name]
     cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/cp_*'))[-1]  # gets the most recent checkpoint
     save_path = cp_path
     if not os.path.exists(save_path):
@@ -407,52 +421,39 @@ def visualize_reevaluated_archives():
     plt.show()
 
 
-def print_corrected_qd_metrics():
+def print_corrected_qd_metrics(algorithm: str, exp_dirs, algorithm_type: str):
+    assert algorithm_type in ['pyribs', 'qdax']
     seeds = [1111, 2222, 3333, 4444]
-    ppga_data = {'coverage': [],
+    alg_data = {'coverage': [],
                  'obj_max': [],
                  'obj_mean': [],
                  'qd_score': [],
                  'num_elites': [],
                  'offset_qd_score': []}
-    pgame_data = copy.deepcopy(ppga_data)
-    final_ppga_data, final_pgame_data = {}, {}
+    final_alg_data = {}
 
-    for exp_name in PPGA_DIRS.keys():
+    for exp_name in exp_dirs.keys():
         # clear any old data and start fresh
-        for key in ppga_data.keys():
-            ppga_data[key] = []
-        for key in pgame_data.keys():
-            pgame_data[key] = []
+        for key in alg_data.keys():
+            alg_data[key] = []
         for seed in seeds:
-            _, new_ppga_archive = load_and_eval_ppga_archive(exp_name, seed, data_is_saved=True)
-            _, new_pgame_archive = load_and_eval_pgame_archive(exp_name, seed, data_is_saved=True)
+            eval_fn = load_and_eval_ppga_archive if algorithm_type == 'pyribs' else load_and_eval_pgame_archive
+            _, new_archive = eval_fn(exp_name, exp_dirs, seed, data_is_saved=False)
 
-            for name, val in new_ppga_archive.stats._asdict().items():
-                ppga_data[name].append(val)
+            for name, val in new_archive.stats._asdict().items():
+                alg_data[name].append(val)
             # this is not in stats, so we need to add it manually
-            ppga_data['offset_qd_score'].append(new_ppga_archive.offset_qd_score)
-
-            for name, val in new_pgame_archive.stats._asdict().items():
-                pgame_data[name].append(val)
-            pgame_data['offset_qd_score'].append(new_pgame_archive.offset_qd_score)
+            alg_data['offset_qd_score'].append(new_archive.offset_qd_score)
 
         # now that we've collected data from all seeds, we can average and put it into the final dict
-        final_ppga_data[exp_name] = {}
-        final_pgame_data[exp_name] = {}
+        final_alg_data[exp_name] = {}
 
-        for name, data in ppga_data.items():
-            final_ppga_data[exp_name][name] = np.mean(np.array(data))
-
-        for name, data in pgame_data.items():
-            final_pgame_data[exp_name][name] = np.mean(np.array(data))
+        for name, data in alg_data.items():
+            final_alg_data[exp_name][name] = np.mean(np.array(data))
 
     # once we've done this for all experiments, we can print the final result
-    for exp_name, data in final_ppga_data.items():
-        print(f'PPGA {exp_name}: Averaged Results: {data}')
-
-    for exp_name, data in final_pgame_data.items():
-        print(f'PGA-ME {exp_name}: Averaged Results: {data}')
+    for exp_name, data in final_alg_data.items():
+        print(f'{algorithm} {exp_name}: Averaged Results: {data}')
 
 
 def get_hyperparam_gridsearch_results():
@@ -493,14 +494,14 @@ def get_hyperparam_gridsearch_results():
     plt.show()
 
 
-def plot_qd_results2():
-    algorithms = {
+def plot_qd_results_main():
+    algorithms = OrderedDict({
         'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
-        'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
-        # 'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
         'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
-        'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300}
-    }
+        'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300},
+        'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
+        'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
+    })
     alg_names = list(algorithms.keys())
     envs = ['humanoid', 'walker2d', 'halfcheetah', 'ant']
     proj.register_projection(DataPostProcessor)
@@ -514,11 +515,15 @@ def plot_qd_results2():
             evals = df['QD/iteration'] * algorithms[algorithm]['evals_per_iter']
             df['Num Evals'] = evals
             df['env'] = env
-            # If the algorithm crashed/restarted mid-training for some reason,
-            # there are missing entries which make the plots look incorrect that we need to interpolate
-            df.fillna(method='ffill', inplace=True)
             df = df.sort_values(by=['QD/iteration'])
-            pass
+
+            # trim PPGA to 500k and PGA-ME to 1mil
+            # if algorithm == 'PPGA':
+            #     df = df.loc[: df[(df['QD/iteration'] == 1667)].index[0] - 1, :]
+            #     df = df[:-1]
+            # if algorithm == 'PGA-ME':
+            #     df = df.loc[: df[(df['QD/iteration'] == 3330)].index[0], :]
+            #     df = df[:-1]
 
             all_data.append(df)
 
@@ -529,8 +534,7 @@ def plot_qd_results2():
         ax_qd = sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[1][envs.index(env)],
                              hue='name', hue_order=alg_names, legend=False)
         ax_cov = sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data,
-                              ax=axs[2][envs.index(env)], hue='name', hue_order=alg_names, legend=False)
-
+                              hue='name', ax=axs[2][envs.index(env)], hue_order=alg_names, legend=False)
 
         axs[0][j].set_ylabel('Best Reward')
         axs[1][j].set_ylabel('QD Score')
@@ -542,22 +546,57 @@ def plot_qd_results2():
                 ax.set(xlabel=None)
             if j >= 1:
                 ax.set(ylabel=None)
+            if i <= 2:
+                pass
+                # ax.get_legend().remove()
+                # ax.ticklabel_format(axis='both', style='scientific', scilimits=(0, 0))
 
     plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
     plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
     plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
     plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
 
     # add titles
     for i, ax in enumerate(axs[0][:]):
-        ax.set_title(envs[i])
+        ax.set_title(envs[i], fontsize=16)
 
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.1)
-    plt.legend(loc='lower center', ncol=4, borderaxespad=0, fancybox=True)
+    fig.subplots_adjust(bottom=0.05)
+    h, l = axs.flatten()[-1].get_legend_handles_labels()
+    fig.legend(h, l, loc='lower center', ncol=5, borderaxespad=0, fancybox=True)
     plt.show()
+
+
+def n1_n2_plots():
+    proj.register_projection(DataPostProcessor)
+    fig, axs = plt.subplots(1, 3, figsize=(12, 4), subplot_kw=dict(projection='data_post_processor'))
+
+    all_data = []
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_10_walksteps_5']))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_10']))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_1_walksteps_1']))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_5']))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive']))  # baseline
+
+    all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['QD/iteration'])
+
+    sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[0], hue='name')
+    sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=all_data, ax=axs[1], hue='name')
+    sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data, ax=axs[2], hue='name')
+
+    axs[0].set_ylabel('QD Score')
+    axs[1].set_ylabel('Best Reward')
+    axs[2].set_ylabel('Coverage (\%)')
+    for ax in axs:
+        ax.get_legend().remove()
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), borderaxespad=0)
+    plt.tight_layout()
+    plt.show()
+
 
 
 if __name__ == '__main__':
     args = parse_args()
-    plot_qd_results2()
+    print_corrected_qd_metrics('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, 'pyribs')
+    # plot_qd_results_main()

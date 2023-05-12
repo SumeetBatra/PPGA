@@ -134,9 +134,9 @@ def reevaluate_ppga_archive(env_cfg, agent_cfg, original_archive, save_path=None
 
     agents = []
     for elite in original_archive:
-        agent = Actor(agent_cfg, obs_shape=obs_shape[0], action_shape=action_shape).deserialize(elite.solution).to(device)
+        agent = Actor(obs_shape=obs_shape[0], action_shape=action_shape, normalize_obs=agent_cfg.normalize_obs).deserialize(elite.solution).to(device)
         if agent_cfg.normalize_obs:
-            agent.obs_normalizer = elite.metadata['obs_normalizer']
+            agent.obs_normalizer.load_state_dict(elite.metadata['obs_normalizer'])
         agents.append(agent)
     agents = np.array(agents)
 
@@ -148,7 +148,7 @@ def reevaluate_ppga_archive(env_cfg, agent_cfg, original_archive, save_path=None
             env_cfg.env_batch_size = len(agent_batch) * 50
             vec_env = make_vec_env_brax(env_cfg)
         print(f'Evaluating solution batch {i}')
-        vec_inference = VectorizedActor(agent_cfg, agent_batch, Actor, obs_shape=obs_shape, action_shape=action_shape).to(device)
+        vec_inference = VectorizedActor(agent_batch, Actor, obs_shape=obs_shape, action_shape=action_shape, normalize_obs=agent_cfg.normalize_obs).to(device)
         objs, measures, metadata = evaluate(vec_inference, vec_env, env_cfg.num_dims, normalize_obs=agent_cfg.normalize_obs)
         all_objs.append(objs)
         all_measures.append(measures)
@@ -215,7 +215,7 @@ def reevaluate_pgame_archive(env_cfg, archive_df=None, solution_batch=None, save
             vec_env = make_vec_env_brax(env_cfg)
         print(f'Evaluating solution batch {i}')
         agents = [PGAMEActor(obs_shape=obs_shape[0], action_shape=action_shape).deserialize(sol).to(device) for sol in sol_batch]
-        vec_inference = VectorizedActor(cfg, agents, PGAMEActor, obs_shape=obs_shape, action_shape=action_shape).to(device)
+        vec_inference = VectorizedActor(agents, PGAMEActor, obs_shape=obs_shape, action_shape=action_shape).to(device)
         objs, measures, metadata = evaluate(vec_inference, vec_env, env_cfg.num_dims)
         all_objs.append(objs)
         all_measures.append(measures)
