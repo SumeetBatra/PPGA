@@ -223,9 +223,9 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
                     hists.append(df)
                     # hists.append(run.history(keys=[key]))
                 hist = pd.concat(hists, axis=1, ignore_index=True)
-                hist = pd.DataFrame(data=hist, columns=[0, 1, 3, 5]).rename(columns={0: 'QD/iteration',
-                                                                                     1: 'QD/coverage (%)',
-                                                                                     3: 'QD/QD Score',
+                hist = pd.DataFrame(data=hist, columns=[1, 2, 5, 8]).rename(columns={1: 'QD/iteration',
+                                                                                     2: 'QD/coverage (%)',
+                                                                                     5: 'QD/QD Score',
                                                                                      5: 'QD/best score'})
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
             hist['name'] = algorithm
@@ -542,7 +542,7 @@ def plot_qd_results_main():
 
     for i, row in enumerate(axs):
         for j, ax in enumerate(row):
-            ax.ticklabel_format(axis='both', style='sci', scilimits=(0, 0))
+            ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
             if i <= 1:
                 ax.set(xlabel=None)
             if j >= 1:
