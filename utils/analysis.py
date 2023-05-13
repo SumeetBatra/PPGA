@@ -226,7 +226,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
                 hist = pd.DataFrame(data=hist, columns=[1, 2, 5, 8]).rename(columns={1: 'QD/iteration',
                                                                                      2: 'QD/coverage (%)',
                                                                                      5: 'QD/QD Score',
-                                                                                     5: 'QD/best score'})
+                                                                                     8: 'QD/best score'})
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
             hist['name'] = algorithm
             hist['color'] = HUES[algorithm]
