@@ -16,14 +16,15 @@ import copy
 
 from pathlib import Path
 from collections import OrderedDict
-# from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, \
-#     reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
+from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, \
+    reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
 from utilities import DataPostProcessor
 from collections import OrderedDict
+from typing import NamedTuple
 
-# plt.style.use('science')
+plt.style.use('science')
 
 api = wandb.Api()
 
@@ -128,8 +129,17 @@ CMA_MAEGA_TD3_ES_DIRS = AttrDict({
 # these are set to match the hue order of seaborn lineplot
 HUES = OrderedDict({'PPGA': 'blue', 'PGA-ME': 'green', 'QDPG': 'orange', 'SEP-CMA-MAE': 'red', 'CMA-MAEGA(TD3, ES)': 'purple'})
 
-list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)']
+list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)', 'TD3GA']
 list2 = ['QDPG', 'PGA-ME']
+
+algorithms = OrderedDict({
+    'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
+    'TD3GA': {'keywords': ['td3ga'], 'evals_per_iter': 300},
+    'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
+    'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300},
+    'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
+    'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
+})
 
 
 def index_of(env_name):
@@ -179,7 +189,7 @@ def compile_cdf(cfg, dataframes=None):
     return cdf
 
 
-def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
+def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], name = None):
     runs = api.runs('qdrl/QDPPO', filters={
         "$and": [{'tags': algorithm}, {'tags': env_name}]
     })
@@ -198,7 +208,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
         if res:
             if algorithm in list1:
                 cached_data_path = cache_dir.joinpath(Path(f'{run.storage_id}.csv'))
-                if cached_data_path.exists() and algorithm != 'CMA-MAEGA(TD3, ES)':
+                if cached_data_path.exists():
                     print(f'Loading cached data for run {run.name}')
                     hist = pd.read_csv(str(cached_data_path))
                 else:
@@ -228,8 +238,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str]):
                                                                                      5: 'QD/QD Score',
                                                                                      8: 'QD/best score'})
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
-            hist['name'] = algorithm
-            hist['color'] = HUES[algorithm]
+            hist['name'] = name if name is not None else algorithm
             hist_list.append(hist)
 
     df = pd.concat(hist_list, ignore_index=True)
@@ -440,7 +449,13 @@ def print_corrected_qd_metrics(algorithm: str, exp_dirs, algorithm_type: str):
             eval_fn = load_and_eval_ppga_archive if algorithm_type == 'pyribs' else load_and_eval_pgame_archive
             _, new_archive = eval_fn(exp_name, exp_dirs, seed, data_is_saved=False)
 
-            for name, val in new_archive.stats._asdict().items():
+            stats = new_archive.stats
+            stats_dict = {'num_elites': stats.num_elites,
+                          'coverage': stats.coverage,
+                          'qd_score': stats.qd_score,
+                          'obj_max': stats.obj_max,
+                          'obj_mean': stats.obj_mean}
+            for name, val in stats_dict.items():
                 alg_data[name].append(val)
             # this is not in stats, so we need to add it manually
             alg_data['offset_qd_score'].append(new_archive.offset_qd_score)
@@ -495,13 +510,6 @@ def get_hyperparam_gridsearch_results():
 
 
 def plot_qd_results_main():
-    algorithms = OrderedDict({
-        'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
-        'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
-        'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300},
-        'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
-        'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
-    })
     alg_names = list(algorithms.keys())
     envs = ['humanoid', 'walker2d', 'halfcheetah', 'ant']
     proj.register_projection(DataPostProcessor)
@@ -552,11 +560,11 @@ def plot_qd_results_main():
                 # ax.get_legend().remove()
                 # ax.ticklabel_format(axis='both', style='scientific', scilimits=(0, 0))
 
-    # plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
-    # plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
-    # plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
-    # plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
-    # plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
 
     # add titles
     for i, ax in enumerate(axs[0][:]):
@@ -574,11 +582,15 @@ def n1_n2_plots():
     fig, axs = plt.subplots(1, 3, figsize=(12, 4), subplot_kw=dict(projection='data_post_processor'))
 
     all_data = []
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_10_walksteps_5']))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_10']))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_1_walksteps_1']))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_5']))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive']))  # baseline
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive'], name='(N1, N2) = (10, 10)'))  # baseline
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_10_walksteps_5'], name='(N1, N2) = (10, 5)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_10'], name='(N1, N2) = (5, 10)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_1_walksteps_1'], name='(N1, N2) = (1, 1)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_5'], name='(N1, N2) = (5, 5)'))
+    for df in all_data:
+        evals = df['QD/iteration'] * algorithms['PPGA']['evals_per_iter']
+        df['Num Evals'] = evals
+        df.sort_values(by=['QD/iteration'], inplace=True)
 
     all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['QD/iteration'])
 
@@ -596,8 +608,42 @@ def n1_n2_plots():
     plt.show()
 
 
+def td3_ablation_plots():
+    proj.register_projection(DataPostProcessor)
+    fig, axs = plt.subplots(1, 3, figsize=(12, 4), subplot_kw=dict(projection='data_post_processor'))
+
+    all_data = []
+    ppga_df = get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive'])  # baseline
+    evals = ppga_df['QD/iteration'] * algorithms['PPGA']['evals_per_iter']
+    ppga_df['Num Evals'] = evals
+    ppga_df = ppga_df.sort_values(by=['QD/iteration'])
+    ppga_df = ppga_df[:-10]
+    all_data.append(ppga_df)
+
+    td3ga_df = get_results_dataframe('humanoid', 'TD3GA', keywords=['td3ga'])
+    evals = ppga_df['QD/iteration'] * algorithms['TD3GA']['evals_per_iter']
+    td3ga_df = td3ga_df.sort_values(by=['QD/iteration'])
+    td3ga_df['Num Evals'] = evals
+    td3ga_df = td3ga_df[:-10]
+    all_data.append(td3ga_df)
+
+    all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['QD/iteration'])
+
+    sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='se', data=all_data, ax=axs[0], hue='name')
+    sns.lineplot(x='Num Evals', y='QD/best score', errorbar='se', data=all_data, ax=axs[1], hue='name')
+    sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='se', data=all_data, ax=axs[2], hue='name')
+
+    axs[0].set_ylabel('QD Score')
+    axs[1].set_ylabel('Best Reward')
+    axs[2].set_ylabel('Coverage (\%)')
+    for ax in axs:
+        ax.get_legend().remove()
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), borderaxespad=0)
+    plt.tight_layout()
+    plt.show()
+
 
 if __name__ == '__main__':
     args = parse_args()
-    plot_qd_results_main()
+    print_corrected_qd_metrics('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, 'pyribs')
     # plot_qd_results_main()
