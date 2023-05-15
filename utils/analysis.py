@@ -14,6 +14,7 @@ import os
 import numpy as np
 import copy
 
+from itertools import cycle
 from pathlib import Path
 from collections import OrderedDict
 from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, \
@@ -100,8 +101,8 @@ PGAME_DIRS = AttrDict({
 
 PPGA_DIRS = AttrDict({
     'humanoid': 'experiments/paper_ppga_humanoid_v2_clipped_nonadaptive',
-    # 'walker2d': 'experiments/paper_ppga_walker2d_v2_clipped',
-    # 'halfcheetah': 'experiments/paper_ppga_halfcheetah_adaptive_stddev_v2',
+    'walker2d': 'experiments/paper_ppga_walker2d_v2_clipped',
+    'halfcheetah': 'experiments/paper_ppga_halfcheetah_adaptive_stddev_v2',
     'ant': 'experiments/paper_ppga_ant_v2'
 })
 
@@ -127,14 +128,18 @@ CMA_MAEGA_TD3_ES_DIRS = AttrDict({
 })
 
 # these are set to match the hue order of seaborn lineplot
-HUES = OrderedDict({'PPGA': 'blue', 'PGA-ME': 'green', 'QDPG': 'orange', 'SEP-CMA-MAE': 'red', 'CMA-MAEGA(TD3, ES)': 'purple'})
+HUES = OrderedDict({'PPGA': (0.1215, 0.4667, 0.7058),
+                    'PGA-ME': (0.17254901960784313, 0.6274509803921569, 0.17254901960784313),
+                    'QDPG': (1.0, 0.4980392156862745, 0.054901960784313725),
+                    'SEP-CMA-MAE': (0.8392156862745098, 0.15294117647058825, 0.1568627450980392),
+                    'CMA-MAEGA(TD3, ES)': (0.5803921568627451, 0.403921568627451, 0.7411764705882353)})
 
 list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)', 'TD3GA']
 list2 = ['QDPG', 'PGA-ME']
 
 algorithms = OrderedDict({
     'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
-    'TD3GA': {'keywords': ['td3ga'], 'evals_per_iter': 300},
+    # 'TD3GA': {'keywords': ['td3ga'], 'evals_per_iter': 300},
     'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
     'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300},
     'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
@@ -189,22 +194,28 @@ def compile_cdf(cfg, dataframes=None):
     return cdf
 
 
-def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], name = None):
+def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], name = None, scaling_exp=False):
     runs = api.runs('qdrl/QDPPO', filters={
         "$and": [{'tags': algorithm}, {'tags': env_name}]
     })
 
     keys = []
     if algorithm in list1:
-        keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']
+        if scaling_exp:
+            keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/Best Score', 'QD/average performance']
+        else:
+            keys = ['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best score']
     elif algorithm in list2:
-        keys = ['coverage', 'qd_score', 'max_fitness']
+        if scaling_exp:
+            keys = ['coverage', 'qd_score', 'max_fitness', 'avg_fitness']
+        else:
+            keys = ['coverage', 'qd_score', 'max_fitness']
 
     hist_list = []
     cache_dir = Path('./.cache')
     cache_dir.mkdir(exist_ok=True)
     for run in runs:
-        res = all([key in run.name for key in keywords]) and '24hr' not in run.name
+        res = all([key in run.name for key in keywords])
         if res:
             if algorithm in list1:
                 cached_data_path = cache_dir.joinpath(Path(f'{run.storage_id}.csv'))
@@ -232,11 +243,23 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], na
                         df.to_csv(str(cached_data_path))
                     hists.append(df)
                     # hists.append(run.history(keys=[key]))
-                hist = pd.concat(hists, axis=1, ignore_index=True)
-                hist = pd.DataFrame(data=hist, columns=[1, 2, 5, 8]).rename(columns={1: 'QD/iteration',
-                                                                                     2: 'QD/coverage (%)',
-                                                                                     5: 'QD/QD Score',
-                                                                                     8: 'QD/best score'})
+                hist = pd.concat(hists, axis=1, ignore_index=False)
+                # remove duplicate cols
+                hist = hist.loc[:, ~hist.columns.duplicated()].copy()
+                if scaling_exp:
+                    hist = pd.DataFrame(data=hist, columns=keys).rename(columns={
+                        'iteration': 'QD/iteration',
+                        'coverage': 'QD/coverage (%)',
+                        'qd_score': 'QD/QD Score',
+                        'max_fitness': 'QD/best score',
+                        'avg_fitness': 'QD/average performance'
+                    })
+                else:
+                    hist = pd.DataFrame(data=hist, columns=keys)\
+                        .rename(columns={'iteration': 'QD/iteration',
+                                         'coverage': 'QD/coverage (%)',
+                                         'qd_score': 'QD/QD Score',
+                                         'max_fitness': 'QD/best score'})
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
             hist['name'] = name if name is not None else algorithm
             hist_list.append(hist)
@@ -264,10 +287,10 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis, standalone: bool = Fals
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
     ax.plot(x, y_avg, linewidth=1.0, label=cfg.algorithm, **kwargs)
-    ax.fill_between(x, y_min, y_max, alpha=0.2, monotonic=False)
+    ax.fill_between(x, y_min, y_max, alpha=0.2, monotonic=False, **kwargs)
     ax.set_xlim(cfg.objective_range)
     ax.set_yticks(np.arange(0, 101, 25.0))
-    ax.set_xlabel("Objective")
+    ax.set_xlabel("Objective", fontsize=16)
     if standalone:
         ax.set_ylabel(y_label)
         ax.set_title(cfg.title)
@@ -343,7 +366,7 @@ def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reeval
             make_cdf_plot(cfg, algo_cdf, axs[j][k])
         else:
             env_idx = index_of(exp_name)
-            make_cdf_plot(cfg, algo_cdf, axs[3][env_idx])
+            make_cdf_plot(cfg, algo_cdf, axs[3][env_idx], color=HUES[algorithm])
 
 
 def load_and_eval_pgame_archive(exp_name, exp_dirs, seed, data_is_saved=False):
@@ -543,22 +566,20 @@ def plot_qd_results_main():
                              hue='name', hue_order=alg_names, legend=False)
         ax_cov = sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data,
                               hue='name', ax=axs[2][envs.index(env)], hue_order=alg_names, legend=False)
+        ax_cov.set_xlabel('Num Evals', fontsize=16)
 
-        axs[0][j].set_ylabel('Best Reward')
-        axs[1][j].set_ylabel('QD Score')
-        axs[2][j].set_ylabel('Coverage (\%)')
+        axs[0][j].set_ylabel('Best Reward', fontsize=16)
+        axs[1][j].set_ylabel('QD Score', fontsize=16)
+        axs[2][j].set_ylabel('Coverage (\%)', fontsize=16)
 
     for i, row in enumerate(axs):
         for j, ax in enumerate(row):
-            ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+            if i < 3:
+                ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
             if i <= 1:
                 ax.set(xlabel=None)
             if j >= 1:
                 ax.set(ylabel=None)
-            if i <= 2:
-                pass
-                # ax.get_legend().remove()
-                # ax.ticklabel_format(axis='both', style='scientific', scilimits=(0, 0))
 
     plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
     plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
@@ -571,9 +592,9 @@ def plot_qd_results_main():
         ax.set_title(envs[i], fontsize=16)
 
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.05)
+    fig.subplots_adjust(bottom=0.08)
     h, l = axs.flatten()[-1].get_legend_handles_labels()
-    fig.legend(h, l, loc='lower center', ncol=5, borderaxespad=0, fancybox=True)
+    fig.legend(h, l, loc='lower center', ncol=5, borderaxespad=0, fancybox=True, fontsize=16)
     plt.show()
 
 
@@ -643,7 +664,38 @@ def td3_ablation_plots():
     plt.show()
 
 
+def plot_scaling_experiment():
+    proj.register_projection(DataPostProcessor)
+    fig, axs = plt.subplots(1, 4, figsize=(16, 4), subplot_kw=dict(projection='data_post_processor'))
+
+    ppga_df = get_results_dataframe('humanoid', 'PPGA', keywords=['4k'], scaling_exp=True)
+    evals = ppga_df['QD/iteration'] * algorithms['PPGA']['evals_per_iter']
+    ppga_df['Num Evals'] = evals
+
+    pgame_df = get_results_dataframe('humanoid', 'PGA-ME', keywords=['24hr'], scaling_exp=True)
+    pgame_df = pgame_df.sort_values(by=['Num Evals'])
+    evals = pgame_df['QD/iteration'] * algorithms['PGA-ME']['evals_per_iter']
+    pgame_df['Num Evals'] = evals
+
+    all_data = pd.concat([ppga_df, pgame_df], ignore_index=True).sort_values(by='Relative Time (Wall)')
+
+    sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[0], hue='name')
+    sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=all_data, ax=axs[1], hue='name')
+    sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data, ax=axs[2], hue='name')
+    sns.lineplot(x='Num Evals', y="QD/average performance (%)", errorbar='sd', data=all_data, ax=axs[3], hue='name')
+
+    axs[0].set_ylabel('QD Score')
+    axs[1].set_ylabel('Best Reward')
+    axs[2].set_ylabel('Coverage (\%)')
+    axs[3].set_ylabel('Avg. Performance')
+    for ax in axs:
+        ax.get_legend().remove()
+    plt.legend(loc='upper left', bbox_to_anchor=(1, 1), borderaxespad=0)
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == '__main__':
     args = parse_args()
-    print_corrected_qd_metrics('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, 'pyribs')
-    # plot_qd_results_main()
+    # print_corrected_qd_metrics('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, 'pyribs')
+    plot_scaling_experiment()
