@@ -4,6 +4,7 @@ import logging
 import pickle
 import wandb
 
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.projections as proj
 import scienceplots
@@ -42,7 +43,7 @@ shared_params = OrderedDict({
                 'num_dims': 2,
                 'episode_length': 1000,
                 'grid_size': 50,
-                'clip_obs_rew': False
+                'clip_obs_rew': True
             }
         },
     'walker2d':
@@ -57,7 +58,7 @@ shared_params = OrderedDict({
                 'num_dims': 2,
                 'episode_length': 1000,
                 'grid_size': 50,
-                'clip_obs_rew': False
+                'clip_obs_rew': True
             }
         },
     'halfcheetah':
@@ -77,7 +78,7 @@ shared_params = OrderedDict({
         },
     'ant':
         {
-            'objective_range': (0, 7000),
+            'objective_range': (0, 6000),
             'objective_resolution': 100,
             'archive_resolution': 10000,
             'skip_len': 200,
@@ -102,7 +103,7 @@ PGAME_DIRS = AttrDict({
 PPGA_DIRS = AttrDict({
     'humanoid': 'experiments/paper_ppga_humanoid_v2_clipped_nonadaptive',
     'walker2d': 'experiments/paper_ppga_walker2d_v2_clipped',
-    'halfcheetah': 'experiments/paper_ppga_halfcheetah_adaptive_stddev_v2',
+    'halfcheetah': 'experiments/paper_ppga_halfcheetah_v2',
     'ant': 'experiments/paper_ppga_ant_v2'
 })
 
@@ -145,6 +146,12 @@ algorithms = OrderedDict({
     'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
     'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
 })
+
+matplotlib.rcParams.update(
+    {
+        "font.size": 16,
+    }
+)
 
 
 def index_of(env_name):
@@ -215,7 +222,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], na
     cache_dir = Path('./.cache')
     cache_dir.mkdir(exist_ok=True)
     for run in runs:
-        res = all([key in run.name for key in keywords])
+        res = all([key in run.name for key in keywords]) and '24hr' not in run.name
         if res:
             if algorithm in list1:
                 cached_data_path = cache_dir.joinpath(Path(f'{run.storage_id}.csv'))
@@ -255,7 +262,7 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], na
                         'avg_fitness': 'QD/average performance'
                     })
                 else:
-                    hist = pd.DataFrame(data=hist, columns=keys)\
+                    hist = pd.DataFrame(data=hist, columns=keys + ['iteration'])\
                         .rename(columns={'iteration': 'QD/iteration',
                                          'coverage': 'QD/coverage (%)',
                                          'qd_score': 'QD/QD Score',
@@ -287,7 +294,7 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis, standalone: bool = Fals
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
     ax.plot(x, y_avg, linewidth=1.0, label=cfg.algorithm, **kwargs)
-    ax.fill_between(x, y_min, y_max, alpha=0.2, monotonic=False, **kwargs)
+    ax.fill_between(x, y_min, y_max, alpha=0.2, **kwargs)
     ax.set_xlim(cfg.objective_range)
     ax.set_yticks(np.arange(0, 101, 25.0))
     ax.set_xlabel("Objective", fontsize=16)
@@ -335,7 +342,7 @@ def get_ppga_df(exp_dir, reevaluated_archive=False):
     return dataframes
 
 
-def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reevaluated_archives=False, axs=None, **kwargs):
+def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reevaluated_archives=False, axs=None, standalone_plot=False, **kwargs):
     '''
     :param algorithm: name of the algorithm
     :param alg_data_dirs: contains env: path string-string pairs for all envs for this algorithm
@@ -343,7 +350,6 @@ def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reeval
     :param reevaluated_archives: whether to plot corrected QD metrics or not
     :param axs: matplotlib axes objects
     '''
-    standalone_plot = False
     if axs is None:
         standalone_plot = True
         fig, axs = plt.subplots(2, 2, figsize=(8, 6))
@@ -355,6 +361,11 @@ def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reeval
         base_cfg = AttrDict(shared_params[exp_name])
         base_cfg['title'] = exp_name
 
+        # TODO: temporary hack
+        if algorithm == 'QDPG' and exp_name in ['walker2d', 'halfcheetah']:
+            base_cfg['env_cfg']['grid_size'] = 10
+            base_cfg['archive_resolution'] = 100
+
         cfg = copy.copy(base_cfg)
         cfg.update({'archive_dir': env_dir, 'algorithm': algorithm})
         dataframe_fn = get_ppga_df if archive_type == 'pyribs' else get_pgame_df
@@ -363,7 +374,7 @@ def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reeval
 
         if standalone_plot:
             (j, k) = np.unravel_index(i, (2, 2))  # b/c there are 4 envs
-            make_cdf_plot(cfg, algo_cdf, axs[j][k])
+            make_cdf_plot(cfg, algo_cdf, axs[j][k], standalone=True)
         else:
             env_idx = index_of(exp_name)
             make_cdf_plot(cfg, algo_cdf, axs[3][env_idx], color=HUES[algorithm])
@@ -373,6 +384,7 @@ def load_and_eval_pgame_archive(exp_name, exp_dirs, seed, data_is_saved=False):
     exp_dir = exp_dirs[exp_name]
     cp_path = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/checkpoint_*'))[0]
     save_path = cp_path
+    print(f'{save_path=}')
     if not os.path.exists(save_path):
         os.mkdir(save_path)
 
@@ -547,6 +559,9 @@ def plot_qd_results_main():
             df['Num Evals'] = evals
             df['env'] = env
             df = df.sort_values(by=['Num Evals'])
+            if algorithm == 'QDPG' and env in ['walker2d', 'halfcheetah']:
+                #  TODO: temporary hack
+                df['QD/QD Score'] *= 25.0
 
             # trim PPGA to 500k and PGA-ME to 1mil
             # if algorithm == 'PPGA':
@@ -695,7 +710,24 @@ def plot_scaling_experiment():
     plt.show()
 
 
+def plot_corrected_cdfs():
+    fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+
+    plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=True, standalone_plot=True, axs=axs)
+    plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=True, standalone_plot=True, axs=axs)
+    plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=True, standalone_plot=True, axs=axs)
+    plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=True, standalone_plot=True, axs=axs)
+    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=True, axs=axs)
+
+    fig.tight_layout()
+    plt.legend()
+    plt.show()
+
+
 if __name__ == '__main__':
     args = parse_args()
-    # print_corrected_qd_metrics('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, 'pyribs')
-    plot_scaling_experiment()
+    # print_corrected_qd_metrics('PPGA', PPGA_DIRS, 'pyribs')
+    # plot_scaling_experiment()
+    plot_corrected_cdfs()
+    # plot_qd_results_main()
+
