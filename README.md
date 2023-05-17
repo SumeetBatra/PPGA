@@ -89,7 +89,7 @@ python3 -m algorithm.train_ppga --help
 See the jupyter notebook `algorithm/enjoy_ppga.ipynb` for instructions and examples on how to visualize results! 
 
 ## Pretrained Archives 
-TODO 
+Trained archives reported in the paper and scheduler checkpoints are hosted on Google Drive and can be downloaded from [here](https://drive.google.com/drive/folders/1dPV5mJNaalqHdMH87KNvGAqnuHi7ozdw?usp=sharing).
 
 ## Results 
 | **Environment** | **QD-Score**       | **Coverage** | **Best Reward** | **Experiment Command**                      |
