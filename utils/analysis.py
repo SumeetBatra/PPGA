@@ -202,7 +202,7 @@ def compile_cdf(cfg, dataframes=None):
 
 
 def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], name = None, scaling_exp=False):
-    runs = api.runs('qdrl/QDPPO', filters={
+    runs = api.runs('qdrl/PPGA', filters={
         "$and": [{'tags': algorithm}, {'tags': env_name}]
     })
 
@@ -510,7 +510,7 @@ def get_hyperparam_gridsearch_results():
     '''Plot the results from the N1, N2 gridsearch experiments'''
     sns.set(rc={'figure.figsize': (8, 6)})
     sns.set_style(style='white')
-    runs = api.runs('qdrl/QDPPO', filters={
+    runs = api.runs('qdrl/PPGA', filters={
         "$and": [{"tags": "PPGA"}, {"tags": "humanoid"}]
     })
     hist_list = []

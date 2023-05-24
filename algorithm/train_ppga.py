@@ -39,7 +39,7 @@ def parse_args():
                         help='Use weights and biases to track the exp')
     parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
     parser.add_argument('--wandb_group', type=str)
-    parser.add_argument('--wandb_project', type=str, default='QDPPO')
+    parser.add_argument('--wandb_project', type=str, default='PPGA')
 
     # args for brax
     parser.add_argument('--env_batch_size', default=1, type=int, help='Number of parallel environments to run')

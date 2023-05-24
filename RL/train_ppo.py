@@ -19,7 +19,7 @@ def parse_args():
                         help='Use weights and biases to track the exp')
     parser.add_argument('--wandb_run_name', type=str, default='ppo_ant')
     parser.add_argument('--wandb_group', type=str)
-    parser.add_argument('--wandb_project', type=str, default='QDPPO')
+    parser.add_argument('--wandb_project', type=str, default='PPGA')
     parser.add_argument('--report_interval', type=int, default=5, help='Log objective results every N updates')
 
     # algorithm args
