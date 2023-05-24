@@ -12,7 +12,7 @@ conda activate ppga
 ```
 Then install this project's custom version of pyribs.
 ```bash
-cd pyribs && pip install -e. && cd..
+cd pyribs && pip install -e. && cd ..
 ```
 ### CUDA 
 This project has been tested on Ubuntu 20.04 with an NVIDIA RTX 3090 GPU. In order to enable GPU-Acceleration, your machine must support 
