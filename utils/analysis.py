@@ -147,11 +147,23 @@ algorithms = OrderedDict({
     'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
 })
 
+# print(matplotlib.rcParams.keys())
 matplotlib.rcParams.update(
     {
         "font.size": 16,
+        "figure.dpi": 150,
+        "text.usetex": True,
+        "font.family": ['Computer Modern']
     }
 )
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+matplotlib.rcParams['mathtext.fontset'] = 'custom'
+matplotlib.rcParams['mathtext.rm'] = 'Bitstream Vera Sans'
+matplotlib.rcParams['mathtext.it'] = 'Bitstream Vera Sans:italic'
+matplotlib.rcParams['mathtext.bf'] = 'Bitstream Vera Sans:bold'
+
+
 
 
 def index_of(env_name):
@@ -294,7 +306,7 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis, standalone: bool = Fals
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
     ax.plot(x, y_avg, linewidth=1.0, label=cfg.algorithm, **kwargs)
-    ax.fill_between(x, y_min, y_max, alpha=0.2, **kwargs)
+    ax.fill_between(x, y_min, y_max, alpha=0.2, monotonic=False, **kwargs)
     ax.set_xlim(cfg.objective_range)
     ax.set_yticks(np.arange(0, 101, 25.0))
     ax.set_xlabel("Objective", fontsize=16)
@@ -590,17 +602,18 @@ def plot_qd_results_main():
     for i, row in enumerate(axs):
         for j, ax in enumerate(row):
             if i < 3:
-                ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+                # ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+                pass
             if i <= 1:
                 ax.set(xlabel=None)
             if j >= 1:
                 ax.set(ylabel=None)
 
-    plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
-    plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
-    plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs)
-    plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
-    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs)
+    plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
 
     # add titles
     for i, ax in enumerate(axs[0][:]):
@@ -615,7 +628,7 @@ def plot_qd_results_main():
 
 def n1_n2_plots():
     proj.register_projection(DataPostProcessor)
-    fig, axs = plt.subplots(1, 3, figsize=(12, 4), subplot_kw=dict(projection='data_post_processor'))
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4), subplot_kw=dict(projection='data_post_processor'))
 
     all_data = []
     all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive'], name='(N1, N2) = (10, 10)'))  # baseline
@@ -646,24 +659,24 @@ def n1_n2_plots():
 
 def td3_ablation_plots():
     proj.register_projection(DataPostProcessor)
-    fig, axs = plt.subplots(1, 3, figsize=(12, 4), subplot_kw=dict(projection='data_post_processor'))
+    fig, axs = plt.subplots(1, 3, figsize=(14, 4), subplot_kw=dict(projection='data_post_processor'))
 
     all_data = []
     ppga_df = get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive'])  # baseline
     evals = ppga_df['QD/iteration'] * algorithms['PPGA']['evals_per_iter']
     ppga_df['Num Evals'] = evals
-    ppga_df = ppga_df.sort_values(by=['QD/iteration'])
+    ppga_df = ppga_df.sort_values(by=['Num Evals'])
     ppga_df = ppga_df[:-10]
     all_data.append(ppga_df)
 
     td3ga_df = get_results_dataframe('humanoid', 'TD3GA', keywords=['td3ga'])
-    evals = ppga_df['QD/iteration'] * algorithms['TD3GA']['evals_per_iter']
-    td3ga_df = td3ga_df.sort_values(by=['QD/iteration'])
+    evals = td3ga_df['QD/iteration'] * algorithms['TD3GA']['evals_per_iter']
     td3ga_df['Num Evals'] = evals
+    td3ga_df = td3ga_df.sort_values(by=['Num Evals'])
     td3ga_df = td3ga_df[:-10]
     all_data.append(td3ga_df)
 
-    all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['QD/iteration'])
+    all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['Num Evals'])
 
     sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='se', data=all_data, ax=axs[0], hue='name')
     sns.lineplot(x='Num Evals', y='QD/best score', errorbar='se', data=all_data, ax=axs[1], hue='name')
@@ -728,6 +741,7 @@ if __name__ == '__main__':
     args = parse_args()
     # print_corrected_qd_metrics('PPGA', PPGA_DIRS, 'pyribs')
     # plot_scaling_experiment()
-    plot_corrected_cdfs()
-    # plot_qd_results_main()
-
+    # plot_corrected_cdfs()
+    plot_qd_results_main()
+    # n1_n2_plots()
+    # td3_ablation_plots()
