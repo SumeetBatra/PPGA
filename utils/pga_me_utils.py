@@ -81,15 +81,5 @@ def pgame_repertoire_to_pyribs_archive(cp_path):
     return archive
 
 
-
 if __name__ == '__main__':
-    # checkpoint_dir = '/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399'
-    # archive = load_pga_me_archive(checkpoint_dir)
-    # archive_df = archive.as_pandas()
-    # elites = archive_df.query("objective > 5000").sort_values("objective", ascending=False)
-    # pass
-
-    cp_path = '/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399/'
-    archive = pgame_repertoire_to_pyribs_archive(cp_path)
-    archive_df = archive.as_pandas(include_solutions=True)
-    archive_df.to_pickle(cp_path + 'ribs_archive.pkl')
+    pass

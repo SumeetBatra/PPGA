@@ -386,9 +386,4 @@ def archive_df_to_archive(archive_df: pandas.DataFrame, **kwargs):
 
 
 if __name__ == '__main__':
-    # evaluate_pga_me_archive('/home/sumeet/QDax/experiments/walker2d_checkpoint/checkpoint_00731')
-    # load_and_eval_archive('/home/sumeet/QDax/experiments/pga_me_ant_uni_testrun_seed_1111/checkpoints/checkpoint_00399/ribs_archive.pkl')
-    cp_path = '/home/sumeet/QDax/experiments/pga_me_walker2d_uni_baseline/pga_me_walker2d_uni_baseline_seed_1111_v2/checkpoints/checkpoint_00399'
-    # archive = pgame_repertoire_to_pyribs_archive(cp_path)
-    # archive.as_pandas().to_pickle(cp_path + 'pgame_archive.pkl')
-    pgame_checkpoint_to_objective_df(cp_path)
+    pass

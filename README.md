@@ -12,7 +12,7 @@ conda activate ppga
 ```
 Then install this project's custom version of pyribs.
 ```bash
-cd pyribs && pip install -e. && cd..
+cd pyribs && pip install -e. && cd ..
 ```
 ### CUDA 
 This project has been tested on Ubuntu 20.04 with an NVIDIA RTX 3090 GPU. In order to enable GPU-Acceleration, your machine must support 
@@ -64,6 +64,7 @@ With CUDA enabled, you will also need to add the cublas library to your LD_LIBRA
 ```bash
 export LD_LIBRARY_PATH=<PATH_TO_ANACONDA>/envs/ppga/lib/python3.9/site-packages/nvidia/cublas/lib/:$LD_LIBRARY_PATH
 ```
+For example, if you use miniconda, this would be `/home/{username}/miniconda3/...`
 
 ## Running Experiments
 We provide run scripts to reproduce the paper results for both local machines and slurm. 
