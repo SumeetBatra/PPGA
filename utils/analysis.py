@@ -2,6 +2,8 @@ import argparse
 import json
 import logging
 import pickle
+import sys
+
 import wandb
 
 import matplotlib
@@ -139,12 +141,12 @@ list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)', 'TD3GA']
 list2 = ['QDPG', 'PGA-ME']
 
 algorithms = OrderedDict({
-    'PPGA': {'keywords': ['paper', 'v2'], 'evals_per_iter': 300},
+    'PPGA': {'keywords': ['paper', 'v3'], 'evals_per_iter': 300},
     # 'TD3GA': {'keywords': ['td3ga'], 'evals_per_iter': 300},
-    'PGA-ME': {'keywords': ['pga_me'], 'evals_per_iter': 300},
-    'QDPG': {'keywords': ['qdpg'], 'evals_per_iter': 300},
-    'SEP-CMA-MAE': {'keywords': ['sep'], 'evals_per_iter': 200},
-    'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es'], 'evals_per_iter': 100},
+    'PGA-ME': {'keywords': ['pga_me', 'grid10'], 'evals_per_iter': 300},
+    # 'QDPG': {'keywords': ['qdpg', 'grid10'], 'evals_per_iter': 300},
+    'SEP-CMA-MAE': {'keywords': ['sep', 'grid10'], 'evals_per_iter': 200},
+    'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es', 'grid10'], 'evals_per_iter': 100},
 })
 
 # print(matplotlib.rcParams.keys())
@@ -152,7 +154,7 @@ matplotlib.rcParams.update(
     {
         "font.size": 16,
         "figure.dpi": 150,
-        "text.usetex": True,
+        "text.usetex": False,
         "font.family": ['Computer Modern']
     }
 )
@@ -282,8 +284,11 @@ def get_results_dataframe(env_name: str, algorithm: str, keywords: list[str], na
             # hist = pd.DataFrame(data=hist, columns=['QD/iteration', 'QD/coverage (%)', 'QD/QD Score', 'QD/best sore'])
             hist['name'] = name if name is not None else algorithm
             hist_list.append(hist)
-
-    df = pd.concat(hist_list, ignore_index=True)
+    try:
+        df = pd.concat(hist_list, ignore_index=True)
+    except Exception as e:
+        print(f'{e} for {algorithm=}, {env_name=}, {keywords=}, {name=}, {scaling_exp=}')
+        sys.exit(0)
     return df
 
 
@@ -603,17 +608,17 @@ def plot_qd_results_main():
         for j, ax in enumerate(row):
             if i < 3:
                 # ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
-                pass
+                ax.set_xlim(0, 5e5)
             if i <= 1:
                 ax.set(xlabel=None)
             if j >= 1:
                 ax.set(ylabel=None)
 
-    plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
-    plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
-    plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
-    plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
-    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    # plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    # plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    # # plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    # plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    # plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
 
     # add titles
     for i, ax in enumerate(axs[0][:]):
