@@ -21,11 +21,13 @@ from itertools import cycle
 from pathlib import Path
 from collections import OrderedDict
 from utils.archive_utils import pgame_checkpoint_to_objective_df, pgame_repertoire_to_pyribs_archive, \
-    reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap
+    reevaluate_pgame_archive, reevaluate_ppga_archive, save_heatmap, archive_df_to_archive
 from attrdict import AttrDict
 from ribs.visualize import grid_archive_heatmap
 from utilities import DataPostProcessor
 from collections import OrderedDict
+from matplotlib.lines import Line2D
+from envs.brax_custom import reward_offset
 from typing import NamedTuple
 
 plt.style.use('science')
@@ -37,14 +39,15 @@ shared_params = OrderedDict({
         {
             'objective_range': (0, 10000),
             'objective_resolution': 100,
-            'archive_resolution': 2500,
+            'archive_resolution': 100,
             'skip_len': 200,
             'algorithm_name': 'cma_mae_100_0.01',
+            'solution_dim': 47906,
             'env_cfg': {
                 'env_name': 'humanoid',
                 'num_dims': 2,
                 'episode_length': 1000,
-                'grid_size': 50,
+                'grid_size': 10,
                 'clip_obs_rew': True
             }
         },
@@ -52,14 +55,15 @@ shared_params = OrderedDict({
         {
             'objective_range': (0, 5000),
             'objective_resolution': 100,
-            'archive_resolution': 2500,
+            'archive_resolution': 100,
             'skip_len': 200,
             'algorithm_name': 'cma_mae_100_0.01',
+            'solution_dim': 19596,
             'env_cfg': {
                 'env_name': 'walker2d',
                 'num_dims': 2,
                 'episode_length': 1000,
-                'grid_size': 50,
+                'grid_size': 10,
                 'clip_obs_rew': True
             }
         },
@@ -67,14 +71,15 @@ shared_params = OrderedDict({
         {
             'objective_range': (0, 9000),
             'objective_resolution': 100,
-            'archive_resolution': 2500,
+            'archive_resolution': 100,
             'skip_len': 200,
             'algorithm_name': 'cma_mae_100_0.01',
+            'solution_dim': 19724,
             'env_cfg': {
                 'env_name': 'halfcheetah',
                 'num_dims': 2,
                 'episode_length': 1000,
-                'grid_size': 50,
+                'grid_size': 10,
                 'clip_obs_rew': False
             }
         },
@@ -85,6 +90,7 @@ shared_params = OrderedDict({
             'archive_resolution': 10000,
             'skip_len': 200,
             'algorithm_name': 'cma_mae_100_0.01',
+            'solution_dim': 28816,
             'env_cfg': {
                 'env_name': 'ant',
                 'num_dims': 4,
@@ -96,57 +102,65 @@ shared_params = OrderedDict({
 })
 
 PGAME_DIRS = AttrDict({
-    'humanoid': f'{Path.home()}/QDax/experiments/pga_me_humanoid_uni_baseline/',
-    'walker2d': f'{Path.home()}/QDax/experiments/pga_me_walker2d_uni_baseline/',
-    'halfcheetah': f'{Path.home()}/QDax/experiments/pga_me_halfcheetah_uni_baseline/',
-    'ant': f'{Path.home()}/QDax/experiments/pga_me_ant_uni_baseline/'
+    'humanoid': f'{Path.home()}/QDax/experiments/pga_me_humanoid_uni_baseline_grid10/',
+    'walker2d': f'{Path.home()}/QDax/experiments/pga_me_walker2d_uni_baseline_grid10/',
+    'halfcheetah': f'{Path.home()}/QDax/experiments/pga_me_halfcheetah_uni_baseline_grid10/',
+    'ant': f'{Path.home()}/QDax/experiments/pga_me_ant_uni_baseline_grid10/'
 })
 
 PPGA_DIRS = AttrDict({
-    'humanoid': 'experiments/paper_ppga_humanoid_v2_clipped_nonadaptive',
-    'walker2d': 'experiments/paper_ppga_walker2d_v2_clipped',
-    'halfcheetah': 'experiments/paper_ppga_halfcheetah_v2',
-    'ant': 'experiments/paper_ppga_ant_v2'
+    'humanoid': 'experiments/paper_ppga_humanoid_grid10',
+    'walker2d': 'experiments/paper_ppga_walker2d_grid10',
+    'halfcheetah': 'experiments/paper_ppga_halfcheetah_grid10',
+    'ant': 'experiments/paper_ppga_ant_grid10'
 })
 
 QDPG_DIRS = AttrDict({
-    'humanoid': 'experiments/qdpg_humanoid',
-    'walker2d': 'experiments/qdpg_walker2d',
-    'halfcheetah': 'experiments/qdpg_halfcheetah',
+    'humanoid': '/home/sumeet/QDax/experiments/qdpg_humanoid_baseline_grid10',
+    'walker2d': '/home/sumeet/QDax/experiments/qdpg_walker2d_baseline_grid10',
+    'halfcheetah': '/home/sumeet/QDax/experiments/qdpg_halfcheetah_baseline_grid10',
     'ant': 'experiments/qdpg_ant'
 })
 
 SEP_CMA_MAE_DIRS = AttrDict({
-    'humanoid': 'experiments/sep_cma_mae_humanoid_baseline',
-    'walker2d': 'experiments/sep_cma_mae_walker2d_baseline',
-    'halfcheetah': 'experiments/sep_cma_mae_halfcheetah_baseline',
+    'humanoid': 'experiments/sep_cma_mae_humanoid_baseline_grid10',
+    'walker2d': 'experiments/sep_cma_mae_walker2d_baseline_grid10',
+    'halfcheetah': 'experiments/sep_cma_mae_halfcheetah_baseline_grid10',
     'ant': 'experiments/sep_cma_mae_ant_baseline'
 })
 
 CMA_MAEGA_TD3_ES_DIRS = AttrDict({
-    'humanoid': 'experiments/cma_maega_td3_es_humanoid_baseline',
-    'walker2d': 'experiments/cma_maega_td3_es_walker2d_baseline',
-    'halfcheetah': 'experiments/cma_maega_td3_es_halfcheetah_baseline',
-    'ant': 'experiments/cma_maega_td3_es_ant_baseline'
+    'humanoid': 'experiments/cma_maega_td3_es_humanoid_baseline_grid10',
+    'walker2d': 'experiments/cma_maega_td3_es_walker2d_baseline_grid10',
+    'halfcheetah': 'experiments/cma_maega_td3_es_halfcheetah_baseline_grid10',
+    'ant': 'experiments/cma_maega_td3_es_ant_baseline_grid10'
+})
+
+PBT_ME_DIRS = AttrDict({
+    'humanoid': '/home/sumeet/QDax/experiments/pbt-me-humanoid'
 })
 
 # these are set to match the hue order of seaborn lineplot
 HUES = OrderedDict({'PPGA': (0.1215, 0.4667, 0.7058),
                     'PGA-ME': (0.17254901960784313, 0.6274509803921569, 0.17254901960784313),
+                    'PPGA-RECOMB': (0.17254901960784313, 0.6274509803921569, 0.17254901960784313),
                     'QDPG': (1.0, 0.4980392156862745, 0.054901960784313725),
                     'SEP-CMA-MAE': (0.8392156862745098, 0.15294117647058825, 0.1568627450980392),
-                    'CMA-MAEGA(TD3, ES)': (0.5803921568627451, 0.403921568627451, 0.7411764705882353)})
+                    'CMA-MAEGA(TD3, ES)': (0.5803921568627451, 0.403921568627451, 0.7411764705882353),
+                    'PBT-ME (SAC)': (0.2784313725490196, 0.2784313725490196, 0.2784313725490196)})
 
-list1 = ['PPGA', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)', 'TD3GA']
-list2 = ['QDPG', 'PGA-ME']
+list1 = ['PPGA', 'PPGA-RECOMB', 'SEP-CMA-MAE', 'CMA-MAEGA(TD3, ES)', 'TD3GA']
+list2 = ['QDPG', 'PGA-ME', 'PBT-ME (SAC)']
 
 algorithms = OrderedDict({
     'PPGA': {'keywords': ['paper', 'v3'], 'evals_per_iter': 300},
     # 'TD3GA': {'keywords': ['td3ga'], 'evals_per_iter': 300},
     'PGA-ME': {'keywords': ['pga_me', 'grid10'], 'evals_per_iter': 300},
-    # 'QDPG': {'keywords': ['qdpg', 'grid10'], 'evals_per_iter': 300},
+    # 'PPGA-RECOMB': {'keywords': ['recomb', 'grid10'], 'evals_per_iter': 300},
+    'QDPG': {'keywords': ['qdpg', 'grid10'], 'evals_per_iter': 300},
     'SEP-CMA-MAE': {'keywords': ['sep', 'grid10'], 'evals_per_iter': 200},
     'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es', 'grid10'], 'evals_per_iter': 100},
+    'PBT-ME (SAC)': {'keywords': ['pbt_me'], 'evals_per_iter': 80}
 })
 
 # print(matplotlib.rcParams.keys())
@@ -311,7 +325,7 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis, standalone: bool = Fals
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
     ax.plot(x, y_avg, linewidth=1.0, label=cfg.algorithm, **kwargs)
-    ax.fill_between(x, y_min, y_max, alpha=0.2, monotonic=False, **kwargs)
+    ax.fill_between(x, y_min, y_max, alpha=0.2, **kwargs)
     ax.set_xlim(cfg.objective_range)
     ax.set_yticks(np.arange(0, 101, 25.0))
     ax.set_xlabel("Objective", fontsize=16)
@@ -346,6 +360,9 @@ def get_ppga_df(exp_dir, reevaluated_archive=False):
     seeds = [1111, 2222, 3333, 4444]
     dataframes = []
     for seed in seeds:
+        # TODO: get rid of hack
+        if 'ant' in exp_dir and 'cma_maega' in exp_dir and (seed == 3333 or seed == 4444):
+            continue
         subdir = sorted(glob.glob(exp_dir + '/' + f'*{seed}*/checkpoints/cp_*'))[-1]  # gets the most recent checkpoint
         if reevaluated_archive:
             filename = glob.glob(subdir + '/' + '*reeval_archive*')[0]
@@ -379,9 +396,9 @@ def plot_cdf_data(algorithm: str, alg_data_dirs: dict, archive_type: str, reeval
         base_cfg['title'] = exp_name
 
         # TODO: temporary hack
-        if algorithm == 'QDPG' and exp_name in ['walker2d', 'halfcheetah']:
-            base_cfg['env_cfg']['grid_size'] = 10
-            base_cfg['archive_resolution'] = 100
+        # if algorithm == 'QDPG' and exp_name in ['walker2d', 'halfcheetah']:
+        #     base_cfg['env_cfg']['grid_size'] = 10
+        #     base_cfg['archive_resolution'] = 100
 
         cfg = copy.copy(base_cfg)
         cfg.update({'archive_dir': env_dir, 'algorithm': algorithm})
@@ -443,10 +460,26 @@ def load_and_eval_ppga_archive(exp_name, exp_dirs, seed, data_is_saved=False):
         agent_cfg = json.load(f)
         agent_cfg = AttrDict(agent_cfg)
 
-    scheduler_fp = glob.glob(cp_path + '/' + 'scheduler_*')[0]
-    with open(scheduler_fp, 'rb') as f:
-        scheduler = pickle.load(f)
-        original_archive = scheduler.archive
+    # scheduler_fp = glob.glob(cp_path + '/' + 'scheduler_*')[0]
+    # with open(scheduler_fp, 'rb') as f:
+    #     scheduler = pickle.load(f)
+    #     original_archive = scheduler.archive
+
+    archive_df_fp = glob.glob(cp_path + '/' + 'archive_*')[0]
+    with open(archive_df_fp, 'rb') as f:
+        archive_df = pickle.load(f)
+        solution_dim = shared_params[exp_name]['solution_dim']
+        num_dims = shared_params[exp_name]['env_cfg']['num_dims']
+        archive_dims = [shared_params[exp_name]['env_cfg']['grid_size']] * num_dims
+        ranges = [(0.0, 1.0)] * num_dims
+        threshold_min = -np.inf
+        qd_offset = reward_offset[exp_name]
+        original_archive = archive_df_to_archive(archive_df,
+                                                 solution_dim=solution_dim,
+                                                 dims=archive_dims,
+                                                 ranges=ranges,
+                                                 threshold_min=threshold_min,
+                                                 qd_offset=qd_offset)
 
     if data_is_saved:
         new_archive_fp = os.path.join(save_path, f'{exp_name}_reeval_archive.pkl')
@@ -482,7 +515,8 @@ def visualize_reevaluated_archives():
     plt.show()
 
 
-def print_corrected_qd_metrics(algorithm: str, exp_dirs, algorithm_type: str):
+
+def print_corrected_qd_metrics(algorithm: str, exp_dirs, algorithm_type: str, data_is_saved: bool = False):
     assert algorithm_type in ['pyribs', 'qdax']
     seeds = [1111, 2222, 3333, 4444]
     alg_data = {'coverage': [],
@@ -494,12 +528,15 @@ def print_corrected_qd_metrics(algorithm: str, exp_dirs, algorithm_type: str):
     final_alg_data = {}
 
     for exp_name in exp_dirs.keys():
+        # TODO: temporary hack. Remove.
+        if exp_name != 'humanoid':
+            continue
         # clear any old data and start fresh
         for key in alg_data.keys():
             alg_data[key] = []
         for seed in seeds:
             eval_fn = load_and_eval_ppga_archive if algorithm_type == 'pyribs' else load_and_eval_pgame_archive
-            _, new_archive = eval_fn(exp_name, exp_dirs, seed, data_is_saved=False)
+            _, new_archive = eval_fn(exp_name, exp_dirs, seed, data_is_saved=data_is_saved)
 
             stats = new_archive.stats
             stats_dict = {'num_elites': stats.num_elites,
@@ -570,15 +607,18 @@ def plot_qd_results_main():
     for j, env in enumerate(envs):
         all_data = []
         for algorithm in algorithms.keys():
+            # since we don't have the data for any of the other envs for pbt-me
+            if 'PBT' in algorithm and env != 'humanoid':
+                continue
             df = get_results_dataframe(env, algorithm, keywords=algorithms[algorithm]['keywords'])
 
             evals = df['QD/iteration'] * algorithms[algorithm]['evals_per_iter']
             df['Num Evals'] = evals
             df['env'] = env
             df = df.sort_values(by=['Num Evals'])
-            if algorithm == 'QDPG' and env in ['walker2d', 'halfcheetah']:
-                #  TODO: temporary hack
-                df['QD/QD Score'] *= 25.0
+            # if algorithm == 'QDPG' and env in ['walker2d', 'halfcheetah']:
+            #     #  TODO: temporary hack
+            #     df['QD/QD Score'] *= 25.0
 
             # trim PPGA to 500k and PGA-ME to 1mil
             # if algorithm == 'PPGA':
@@ -604,6 +644,9 @@ def plot_qd_results_main():
         axs[1][j].set_ylabel('QD Score', fontsize=16)
         axs[2][j].set_ylabel('Coverage (\%)', fontsize=16)
 
+    # add pbt-me data from csv
+    plot_pbt_me_results(axs[:3, 1:])
+
     for i, row in enumerate(axs):
         for j, ax in enumerate(row):
             if i < 3:
@@ -614,11 +657,12 @@ def plot_qd_results_main():
             if j >= 1:
                 ax.set(ylabel=None)
 
-    # plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
-    # plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
-    # # plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
-    # plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
-    # plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('PPGA', PPGA_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    # plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
+    plot_cdf_data('PBT-ME (SAC)', PBT_ME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
 
     # add titles
     for i, ax in enumerate(axs[0][:]):
@@ -627,7 +671,9 @@ def plot_qd_results_main():
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.08)
     h, l = axs.flatten()[-1].get_legend_handles_labels()
-    fig.legend(h, l, loc='lower center', ncol=5, borderaxespad=0, fancybox=True, fontsize=16)
+    h.append(Line2D([0], [0], color=HUES['PBT-ME (SAC)']))
+    l.append('PBT-ME(SAC)')
+    fig.legend(h, l, loc='lower center', ncol=6, borderaxespad=0, fancybox=True, fontsize=16)
     plt.show()
 
 
@@ -636,11 +682,11 @@ def n1_n2_plots():
     fig, axs = plt.subplots(1, 3, figsize=(16, 4), subplot_kw=dict(projection='data_post_processor'))
 
     all_data = []
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive'], name='(N1, N2) = (10, 10)'))  # baseline
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_10_walksteps_5'], name='(N1, N2) = (10, 5)'))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_10'], name='(N1, N2) = (5, 10)'))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_1_walksteps_1'], name='(N1, N2) = (1, 1)'))
-    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['gradsteps_5_walksteps_5'], name='(N1, N2) = (5, 5)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v3'], name='(N1, N2) = (10, 10)'))  # baseline
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['n1_10_n2_5'], name='(N1, N2) = (10, 5)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['n1_5_n2_10'], name='(N1, N2) = (5, 10)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['n1_1_n2_1'], name='(N1, N2) = (1, 1)'))
+    all_data.append(get_results_dataframe('humanoid', 'PPGA', keywords=['n1_5_n2_5'], name='(N1, N2) = (5, 5)'))
     for df in all_data:
         evals = df['QD/iteration'] * algorithms['PPGA']['evals_per_iter']
         df['Num Evals'] = evals
@@ -664,17 +710,17 @@ def n1_n2_plots():
 
 def td3_ablation_plots():
     proj.register_projection(DataPostProcessor)
-    fig, axs = plt.subplots(1, 3, figsize=(14, 4), subplot_kw=dict(projection='data_post_processor'))
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4), subplot_kw=dict(projection='data_post_processor'))
 
     all_data = []
-    ppga_df = get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v2_clipped_nonadaptive'])  # baseline
+    ppga_df = get_results_dataframe('humanoid', 'PPGA', keywords=['paper', 'v3'])  # baseline
     evals = ppga_df['QD/iteration'] * algorithms['PPGA']['evals_per_iter']
     ppga_df['Num Evals'] = evals
     ppga_df = ppga_df.sort_values(by=['Num Evals'])
     ppga_df = ppga_df[:-10]
     all_data.append(ppga_df)
 
-    td3ga_df = get_results_dataframe('humanoid', 'TD3GA', keywords=['td3ga'])
+    td3ga_df = get_results_dataframe('humanoid', 'TD3GA', keywords=['td3ga', 'grid10'])
     evals = td3ga_df['QD/iteration'] * algorithms['TD3GA']['evals_per_iter']
     td3ga_df['Num Evals'] = evals
     td3ga_df = td3ga_df.sort_values(by=['Num Evals'])
@@ -735,18 +781,85 @@ def plot_corrected_cdfs():
     plot_cdf_data('PGA-ME', PGAME_DIRS, archive_type='qdax', reevaluated_archives=True, standalone_plot=True, axs=axs)
     plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=True, standalone_plot=True, axs=axs)
     plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=True, standalone_plot=True, axs=axs)
-    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=True, axs=axs)
+    plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=True, standalone_plot=True, axs=axs)
+    # plot_cdf_data('PBT-ME (SAC)', PBT_ME_DIRS, archive_type='qdax', reevaluated_archives=True, axs=axs)
 
     fig.tight_layout()
     plt.legend()
     plt.show()
 
 
+def plot_recomb_ablation():
+    alg_names = ['PPGA', 'PPGA-RECOMB']
+    envs = ['humanoid']
+    proj.register_projection(DataPostProcessor)
+    fig, axs = plt.subplots(1, 3, figsize=(16, 4), subplot_kw=dict(projection='data_post_processor'))
+
+    for j, env in enumerate(envs):
+        all_data = []
+        for algorithm in alg_names:
+            df = get_results_dataframe(env, algorithm, keywords=algorithms[algorithm]['keywords'])
+            evals = df['QD/iteration'] * algorithms[algorithm]['evals_per_iter']
+            df['Num Evals'] = evals
+            df['env'] = env
+
+            df = df.sort_values(by=['Num Evals'])
+            all_data.append(df)
+
+        all_data = pd.concat(all_data, ignore_index=True).sort_values(by=['Num Evals'])
+
+        ax_best = sns.lineplot(x='Num Evals', y='QD/best score', errorbar='sd', data=all_data,
+                               ax=axs[0], hue='name', hue_order=alg_names, legend=False)
+        ax_qd = sns.lineplot(x='Num Evals', y='QD/QD Score', errorbar='sd', data=all_data, ax=axs[1],
+                             hue='name', hue_order=alg_names, legend=False)
+        ax_cov = sns.lineplot(x='Num Evals', y="QD/coverage (%)", errorbar='sd', data=all_data,
+                              hue='name', ax=axs[2], hue_order=alg_names, legend=True)
+        ax_cov.set_xlabel('Num Evals', fontsize=16)
+
+    axs[0].set_ylabel('Best Reward', fontsize=16)
+    axs[1].set_ylabel('QD Score', fontsize=16)
+    axs[2].set_ylabel('Coverage (\%)', fontsize=16)
+
+    for ax in axs:
+        ax.set_xlim(0, 5e5)
+        ax.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(2.5e5))
+
+    fig.tight_layout()
+    # axs[-1].legend()
+    # fig.subplots_adjust(bottom=0.08)
+    # h, l = axs.flatten()[-1].get_legend_handles_labels()
+    # fig.legend(h, l, loc='lower center', ncol=5, borderaxespad=0, fancybox=True, fontsize=16)
+    plt.show()
+
+
+def plot_pbt_me_results(axs):
+    csv_path = Path('data/pbt_map_elites_results.csv')
+    df = pd.read_csv(csv_path)
+    envs = ['Walker2d-Uni', 'HalfCheetah-Uni', 'Ant-Uni']
+    hue = (0.2784313725490196, 0.2784313725490196, 0.2784313725490196)  # pink
+
+    for j, env in enumerate(envs):
+        df_env = df[df['Environment Name'] == env]
+        df_env = df_env[df_env['Algorithm Name'] == 'PBT-MAP-Elites (SAC)']
+        if env != 'Ant-Uni':
+            df_env['QD Score'] /= 10.24
+        elif env == 'Ant-Uni':
+            df_env['QD Score'] *= 9.765625
+        
+        df_env['Num Evals'] = df_env['Env Steps'] / 2250
+        sns.lineplot(x='Num Evals', y='Max Fitness', errorbar='sd', data=df_env, ax=axs[0][j], color=hue, legend=False)
+        sns.lineplot(x='Num Evals', y='QD Score', errorbar='sd', data=df_env, ax=axs[1][j], color=hue, legend=False)
+        sns.lineplot(x='Num Evals', y='Coverage', errorbar='sd', data=df_env, ax=axs[2][j], color=hue, legend=False)
+
+
 if __name__ == '__main__':
     args = parse_args()
-    # print_corrected_qd_metrics('PPGA', PPGA_DIRS, 'pyribs')
+    # print_corrected_qd_metrics('QDPG', QDPG_DIRS, 'qdax', data_is_saved=False)
+    # print_corrected_qd_metrics('PBT-ME (SAC)', PBT_ME_DIRS, 'qdax', data_is_saved=False)
     # plot_scaling_experiment()
-    # plot_corrected_cdfs()
-    plot_qd_results_main()
+    plot_corrected_cdfs()
+    # plot_qd_results_main()
+    # plot_pbt_me_results()
+    # plot_recomb_ablation()
     # n1_n2_plots()
     # td3_ablation_plots()

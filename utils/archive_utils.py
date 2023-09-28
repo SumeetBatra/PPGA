@@ -380,9 +380,15 @@ def archive_df_to_archive(archive_df: pandas.DataFrame, **kwargs):
     measures_batch = archive_df.filter(regex='measure*').to_numpy()
     obj_batch = archive_df.filter(regex='objective').to_numpy().flatten()
     metadata_batch = archive_df.filter(regex='metadata').to_numpy().flatten()
+    if len(metadata_batch) == 0:
+        metadata_batch = None
     archive = GridArchive(**kwargs)
     archive.add(solution_batch, obj_batch, measures_batch, metadata_batch)
     return archive
+
+
+def visualize_pgame_archive():
+    pass
 
 
 if __name__ == '__main__':
