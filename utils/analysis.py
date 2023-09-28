@@ -160,7 +160,7 @@ algorithms = OrderedDict({
     'QDPG': {'keywords': ['qdpg', 'grid10'], 'evals_per_iter': 300},
     'SEP-CMA-MAE': {'keywords': ['sep', 'grid10'], 'evals_per_iter': 200},
     'CMA-MAEGA(TD3, ES)': {'keywords': ['td3_es', 'grid10'], 'evals_per_iter': 100},
-    'PBT-ME (SAC)': {'keywords': ['pbt_me'], 'evals_per_iter': 80}
+    # 'PBT-ME (SAC)': {'keywords': ['pbt_me'], 'evals_per_iter': 80}
 })
 
 # print(matplotlib.rcParams.keys())
@@ -325,7 +325,7 @@ def make_cdf_plot(cfg, data: pd.DataFrame, ax: plt.axis, standalone: bool = Fals
     y_min = data.filter(regex='Min').to_numpy().flatten()
     y_max = data.filter(regex='Max').to_numpy().flatten()
     ax.plot(x, y_avg, linewidth=1.0, label=cfg.algorithm, **kwargs)
-    ax.fill_between(x, y_min, y_max, alpha=0.2, **kwargs)
+    ax.fill_between(x, y_min, y_max, alpha=0.2, monotonic=False, **kwargs)
     ax.set_xlim(cfg.objective_range)
     ax.set_yticks(np.arange(0, 101, 25.0))
     ax.set_xlabel("Objective", fontsize=16)
@@ -645,7 +645,7 @@ def plot_qd_results_main():
         axs[2][j].set_ylabel('Coverage (\%)', fontsize=16)
 
     # add pbt-me data from csv
-    plot_pbt_me_results(axs[:3, 1:])
+    # plot_pbt_me_results(axs[:3, 1:])
 
     for i, row in enumerate(axs):
         for j, ax in enumerate(row):
@@ -662,7 +662,7 @@ def plot_qd_results_main():
     # plot_cdf_data('QDPG', QDPG_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
     plot_cdf_data('SEP-CMA-MAE', SEP_CMA_MAE_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
     plot_cdf_data('CMA-MAEGA(TD3, ES)', CMA_MAEGA_TD3_ES_DIRS, archive_type='pyribs', reevaluated_archives=False, axs=axs, monotonic=False)
-    plot_cdf_data('PBT-ME (SAC)', PBT_ME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
+    # plot_cdf_data('PBT-ME (SAC)', PBT_ME_DIRS, archive_type='qdax', reevaluated_archives=False, axs=axs, monotonic=False)
 
     # add titles
     for i, ax in enumerate(axs[0][:]):
@@ -671,8 +671,6 @@ def plot_qd_results_main():
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.08)
     h, l = axs.flatten()[-1].get_legend_handles_labels()
-    h.append(Line2D([0], [0], color=HUES['PBT-ME (SAC)']))
-    l.append('PBT-ME(SAC)')
     fig.legend(h, l, loc='lower center', ncol=6, borderaxespad=0, fancybox=True, fontsize=16)
     plt.show()
 
@@ -857,8 +855,8 @@ if __name__ == '__main__':
     # print_corrected_qd_metrics('QDPG', QDPG_DIRS, 'qdax', data_is_saved=False)
     # print_corrected_qd_metrics('PBT-ME (SAC)', PBT_ME_DIRS, 'qdax', data_is_saved=False)
     # plot_scaling_experiment()
-    plot_corrected_cdfs()
-    # plot_qd_results_main()
+    # plot_corrected_cdfs()
+    plot_qd_results_main()
     # plot_pbt_me_results()
     # plot_recomb_ablation()
     # n1_n2_plots()
